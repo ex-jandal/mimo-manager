@@ -76,6 +76,7 @@ impl Palette {
              .pane row:selected {{ background-color: {selection}; color: {fg}; }}\n\
              .commandline {{ background-color: {bg_alt}; color: {fg_alt}; padding: 4px 12px; }}\n\
              .modeline {{ background-color: {bg_alt}; padding: 5px 12px; }}\n\
+             .workstabs {{ background-color: {bg}; padding: 4px 12px; border-top: 1px solid {selection}; }}\n\
              .detail-title {{ background-color: {bg_alt}; color: {yellow}; padding: 7px 12px; }}\n",
             bg = self.bg,
             bg_alt = self.bg_alt,
@@ -171,6 +172,29 @@ fn span(colour: &str, text: &str) -> String {
     format!("<span foreground=\"{colour}\">{}</span>", escape(text))
 }
 
+/// Render the workspace tab strip below the modeline, numbering each tab and
+/// highlighting the active one.
+pub fn workspace_tabs(labels: &[&str], active: usize) -> String {
+    let palette = MELANGE_DARK;
+    labels
+        .iter()
+        .enumerate()
+        .map(|(index, label)| {
+            let (colour, weight) = if index == active {
+                (palette.green_bright, "bold")
+            } else {
+                (palette.fg_dim, "normal")
+            };
+            format!(
+                "<span foreground=\"{colour}\" weight=\"{weight}\">{} {}</span>",
+                index + 1,
+                escape(label)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("   ")
+}
+
 fn escape(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -259,5 +283,16 @@ mod tests {
         let css = MELANGE_DARK.stylesheet();
         assert!(css.contains(MELANGE_DARK.bg));
         assert!(css.contains(MELANGE_DARK.bg_alt));
+    }
+
+    #[test]
+    fn workspace_tabs_highlight_the_active_one() {
+        let tabs = workspace_tabs(&["MIME TYPES", "SIMPLE"], 1);
+        assert!(tabs.contains("1 MIME TYPES") && tabs.contains("2 SIMPLE"));
+        assert!(
+            tabs.contains(MELANGE_DARK.green_bright),
+            "the active tab is bright"
+        );
+        assert!(tabs.contains(MELANGE_DARK.fg_dim), "the others are dim");
     }
 }

@@ -93,13 +93,22 @@ fn extend_unique(target: &mut Vec<String>, values: Vec<String>) {
 ///
 /// Returns the path that was written.
 pub fn apply(paths: &Paths, edit: &AssocEdit) -> Result<PathBuf> {
+    apply_all(paths, std::slice::from_ref(edit))
+}
+
+/// Apply several edits to the writable file in a single load/save cycle.
+///
+/// Returns the path that was written.
+pub fn apply_all(paths: &Paths, edits: &[AssocEdit]) -> Result<PathBuf> {
     let target = write_target(paths);
     let mut file = MimeappsFile::load(&target)?;
-    match edit {
-        AssocEdit::SetDefault { mime, app } => file.set_default(mime, app),
-        AssocEdit::Add { mime, app } => file.add_association(mime, app),
-        AssocEdit::Remove { mime, app } => file.remove_association(mime, app),
-        AssocEdit::Reset { mime } => file.reset(mime),
+    for edit in edits {
+        match edit {
+            AssocEdit::SetDefault { mime, app } => file.set_default(mime, app),
+            AssocEdit::Add { mime, app } => file.add_association(mime, app),
+            AssocEdit::Remove { mime, app } => file.remove_association(mime, app),
+            AssocEdit::Reset { mime } => file.reset(mime),
+        }
     }
     file.save(&target)?;
     Ok(target)

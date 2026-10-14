@@ -12,11 +12,13 @@ use relm4::gtk::{self, gdk, glib};
 use relm4::prelude::*;
 
 use crate::assoc::{AssocEdit, Associations, MimeappsFile};
+use crate::commands;
 use crate::config::Config;
 use crate::desktop::discovery::{DiscoveryReport, discover};
 use crate::interaction::{Action, Interaction, Key as UiKey, Mode, Workspace};
 use crate::mime::MimeDatabase;
 use crate::session::Session;
+use crate::simple;
 use crate::theme::{self, Modeline, ModelineFields};
 use crate::xdg::Paths;
 
@@ -46,6 +48,7 @@ struct AppModel {
     detail_title: gtk::Label,
     modeline_left: gtk::Label,
     modeline_right: gtk::Label,
+    workspace_tabs: gtk::Label,
 }
 
 #[derive(Debug)]
@@ -113,7 +116,11 @@ impl SimpleComponent for AppModel {
                 },
 
                 #[name(input_label)]
-                gtk::Label { set_xalign: 0.0, add_css_class: "commandline" },
+                gtk::Label {
+                    set_xalign: 0.0,
+                    set_use_markup: true,
+                    add_css_class: "commandline",
+                },
 
                 gtk::Box {
                     set_orientation: gtk::Orientation::Horizontal,
@@ -131,6 +138,13 @@ impl SimpleComponent for AppModel {
                         set_xalign: 1.0,
                         set_use_markup: true,
                     },
+                },
+
+                #[name(workspace_tabs)]
+                gtk::Label {
+                    set_xalign: 0.0,
+                    set_use_markup: true,
+                    add_css_class: "workstabs",
                 },
             },
         }
@@ -175,6 +189,7 @@ impl SimpleComponent for AppModel {
             detail_title: widgets.detail_title.clone(),
             modeline_left: widgets.modeline_left.clone(),
             modeline_right: widgets.modeline_right.clone(),
+            workspace_tabs: widgets.workspace_tabs.clone(),
         };
         model.modeline_fields = model.config.modeline.clone().into();
 
@@ -208,6 +223,7 @@ impl AppModel {
                         self.edit(AssocEdit::SetDefault { mime, app });
                     }
                 }
+                Action::SetDefaultFor(app) => self.set_default_for(app),
                 Action::Add(app) => {
                     if let Some(mime) = self.selected_mime() {
                         self.edit(AssocEdit::Add { mime, app });
@@ -241,14 +257,21 @@ impl AppModel {
                     Err(error) => self.fail(error),
                 },
                 Action::OpenDetail => {}
-                Action::Activate => {
-                    if self.interaction.workspace() == Workspace::MimeTypes
-                        && let (Some(mime), Some(app)) =
+                Action::Activate => match self.interaction.workspace() {
+                    Workspace::MimeTypes => {
+                        if let (Some(mime), Some(app)) =
                             (self.selected_mime(), self.selected_detail_app())
-                    {
-                        self.edit(AssocEdit::SetDefault { mime, app });
+                        {
+                            self.edit(AssocEdit::SetDefault { mime, app });
+                        }
                     }
-                }
+                    Workspace::Categories => {
+                        if let Some(app) = self.selected_detail_app() {
+                            self.set_default_for(app);
+                        }
+                    }
+                    _ => {}
+                },
                 Action::OpenConfig => self.open_config(),
                 Action::SetTheme(_) => {
                     self.interaction
@@ -308,6 +331,35 @@ impl AppModel {
             .cloned()
     }
 
+    /// The simple-mode entry selected in the list.
+    fn selected_simple(&self) -> Option<&'static simple::SimpleEntry> {
+        if self.interaction.workspace() != Workspace::Categories {
+            return None;
+        }
+        let label = self.list_items.get(self.interaction.list_selection())?;
+        simple::entries().iter().find(|entry| entry.label == label)
+    }
+
+    /// Set `app` as the default for every member of the selected simple entry.
+    fn set_default_for(&mut self, app: String) {
+        let Some(entry) = self.selected_simple() else {
+            return;
+        };
+        let edits: Vec<AssocEdit> = entry
+            .members(&self.db)
+            .into_iter()
+            .map(|mime| AssocEdit::SetDefault {
+                mime,
+                app: app.clone(),
+            })
+            .collect();
+        let what = format!("set default for {}", entry.label);
+        match self.session.apply_batch(&edits) {
+            Ok(()) => self.after_write(&what),
+            Err(error) => self.fail(error),
+        }
+    }
+
     fn refresh(&mut self) {
         self.rebuild_list();
         self.rebuild_detail();
@@ -322,6 +374,15 @@ impl AppModel {
         self.update_page_rows();
         self.update_modeline();
         self.update_input_line();
+        self.update_workspace_tabs();
+    }
+
+    /// Render the workspace tab strip, highlighting the active workspace.
+    fn update_workspace_tabs(&mut self) {
+        let labels: Vec<&str> = Workspace::ALL.iter().map(|w| w.label()).collect();
+        let active = self.interaction.workspace_index() - 1;
+        self.workspace_tabs
+            .set_markup(&theme::workspace_tabs(&labels, active));
     }
 
     /// Derive how many rows fit on screen so half-page jumps match the window.
@@ -359,6 +420,23 @@ impl AppModel {
                     if filter.is_empty() || app.name.to_lowercase().contains(&filter) {
                         self.list_items.push(app.name.clone());
                         self.list_app_indices.push(index);
+                    }
+                }
+            }
+            Workspace::Categories => {
+                for entry in simple::entries() {
+                    if filter.is_empty() || entry.label.to_lowercase().contains(&filter) {
+                        self.list_items.push(entry.label.to_string());
+                    }
+                }
+            }
+            Workspace::Help => {
+                if filter.is_empty() || "key bindings".contains(&filter) {
+                    self.list_items.push("KEY BINDINGS".to_string());
+                }
+                for spec in commands::COMMANDS {
+                    if filter.is_empty() || spec.name.contains(&filter) {
+                        self.list_items.push(spec.name.to_string());
                     }
                 }
             }
@@ -444,6 +522,81 @@ impl AppModel {
                     self.detail_title.set_label("");
                 }
             }
+            Workspace::Categories => {
+                if let Some(entry) = self.selected_simple() {
+                    let members = entry.members(&self.db);
+                    let default = self.assoc.default_app(entry.probe).map(str::to_string);
+                    let mut seen = std::collections::HashSet::new();
+                    for app in &self.apps.apps {
+                        let applies = app
+                            .mime_types
+                            .iter()
+                            .any(|m| members.iter().any(|member| member.eq_ignore_ascii_case(m)));
+                        if applies && seen.insert(app.id.clone()) {
+                            let marker = if default.as_deref() == Some(app.id.as_str()) {
+                                "● "
+                            } else {
+                                "  "
+                            };
+                            self.detail_items
+                                .push(format!("{marker}{}  [{}]", app.name, app.id));
+                            self.detail_ids.push(app.id.clone());
+                        }
+                    }
+                    if self.detail_items.is_empty() {
+                        self.detail_items.push("(no applications)".into());
+                    }
+                    let kind = if entry.role {
+                        "default role"
+                    } else {
+                        "content category"
+                    };
+                    let suffix = if entry.label == "Terminal" {
+                        "  ·  some tools read $TERMINAL instead"
+                    } else {
+                        ""
+                    };
+                    self.detail_title
+                        .set_label(&format!("{}  ·  {kind}{suffix}", entry.label));
+                } else {
+                    self.detail_title.set_label("(no entry selected)");
+                }
+            }
+            Workspace::Help => {
+                match self
+                    .list_items
+                    .get(self.interaction.list_selection())
+                    .map(String::as_str)
+                {
+                    Some("KEY BINDINGS") => {
+                        self.detail_title.set_label("Key bindings");
+                        for key in commands::KEYS {
+                            self.detail_items
+                                .push(format!("{:<16}  {}", key.keys, key.help));
+                        }
+                    }
+                    Some(name) => {
+                        if let Some(spec) = commands::COMMANDS.iter().find(|s| s.name == name) {
+                            self.detail_title.set_label(&format!(":{}", spec.name));
+                            let usage = if spec.args.is_empty() {
+                                format!(":{}", spec.name)
+                            } else {
+                                format!(":{} {}", spec.name, spec.args)
+                            };
+                            self.detail_items.push(format!("usage:   {usage}"));
+                            if !spec.aliases.is_empty() {
+                                self.detail_items
+                                    .push(format!("aliases: {}", spec.aliases.join(", ")));
+                            }
+                            self.detail_items.push(String::new());
+                            self.detail_items.push(spec.help.to_string());
+                        } else {
+                            self.detail_title.set_label("");
+                        }
+                    }
+                    None => self.detail_title.set_label("Help"),
+                }
+            }
             Workspace::Desktop => {
                 self.detail_title.set_label("Desktop entries");
                 self.detail_items
@@ -471,17 +624,23 @@ impl AppModel {
     fn update_modeline(&mut self) {
         let it = &self.interaction;
 
-        let default = self
+        // The MIME key whose default represents the current selection: the
+        // selected MIME type, or the probe of the selected simple entry.
+        let key = self
             .selected_mime()
-            .and_then(|mime| self.assoc.default_app(&mime).map(str::to_string))
+            .or_else(|| self.selected_simple().map(|entry| entry.probe.to_string()));
+
+        let default = key
+            .as_deref()
+            .and_then(|mime| self.assoc.default_app(mime).map(str::to_string))
             .or_else(|| {
-                self.selected_mime()
-                    .and_then(|mime| crate::queries::default_app(&mime).map(|a| a.name))
+                key.as_deref()
+                    .and_then(|mime| crate::queries::default_app(mime).map(|a| a.name))
             })
             .unwrap_or_else(|| "-".to_string());
 
-        let scope = match self.selected_mime() {
-            Some(mime) if self.user_override(&mime) => "user",
+        let scope = match key.as_deref() {
+            Some(mime) if self.user_override(mime) => "user",
             Some(_) => "system",
             None => "-",
         };
@@ -514,13 +673,32 @@ impl AppModel {
 
     fn update_input_line(&mut self) {
         let it = &self.interaction;
-        let (text, visible) = match it.mode() {
-            Mode::Command => (format!(":{}", it.input()), true),
-            Mode::Search => (format!("/{}", it.input()), true),
-            Mode::Confirm => (it.prompt().unwrap_or_default(), true),
-            Mode::Normal => (String::new(), false),
+        let (text, ghost, visible) = match it.mode() {
+            Mode::Command => (
+                format!(":{}", it.input()),
+                it.command_suggestion().unwrap_or_default(),
+                true,
+            ),
+            Mode::Search => (format!("/{}", it.input()), String::new(), true),
+            Mode::Confirm => (it.prompt().unwrap_or_default(), String::new(), true),
+            Mode::Normal => (String::new(), String::new(), false),
         };
-        self.input_label.set_label(&text);
+
+        if text.is_empty() && ghost.is_empty() {
+            self.input_label.set_label("");
+        } else {
+            let typed = glib::markup_escape_text(&text);
+            let suffix = if ghost.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<span foreground=\"{}\">{}</span>",
+                    theme::MELANGE_DARK.fg_dim,
+                    glib::markup_escape_text(&ghost)
+                )
+            };
+            self.input_label.set_markup(&format!("{typed}{suffix}"));
+        }
         self.input_label.set_visible(visible);
     }
 }

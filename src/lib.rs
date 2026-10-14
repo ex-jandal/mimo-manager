@@ -5,6 +5,7 @@
 //! The core never touches GTK and is exercised directly by the test suite.
 
 pub mod assoc;
+pub mod commands;
 pub mod config;
 pub mod desktop;
 pub mod domain;
@@ -13,6 +14,7 @@ pub mod interaction;
 pub mod mime;
 pub mod queries;
 pub mod session;
+pub mod simple;
 pub mod theme;
 pub mod ui;
 pub mod xdg;
