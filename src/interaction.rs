@@ -10,18 +10,16 @@
 pub enum Workspace {
     MimeTypes,
     Applications,
-    Desktop,
     Config,
     Categories,
     Help,
 }
 
 impl Workspace {
-    pub const ALL: [Workspace; 6] = [
+    pub const ALL: [Workspace; 5] = [
         Workspace::MimeTypes,
         Workspace::Categories,
         Workspace::Applications,
-        Workspace::Desktop,
         Workspace::Config,
         Workspace::Help,
     ];
@@ -30,7 +28,6 @@ impl Workspace {
         match self {
             Workspace::MimeTypes => "MIME TYPES",
             Workspace::Applications => "APPLICATIONS",
-            Workspace::Desktop => "DESKTOP",
             Workspace::Config => "CONFIG",
             Workspace::Categories => "SIMPLE",
             Workspace::Help => "HELP",
@@ -41,7 +38,6 @@ impl Workspace {
         match name {
             "m" | "mime" | "mime-types" | "mimetypes" => Some(Workspace::MimeTypes),
             "a" | "apps" | "applications" => Some(Workspace::Applications),
-            "d" | "desktop" => Some(Workspace::Desktop),
             "c" | "config" => Some(Workspace::Config),
             "s" | "simple" | "cat" | "categories" => Some(Workspace::Categories),
             "h" | "help" | "?" => Some(Workspace::Help),
@@ -409,6 +405,8 @@ impl Interaction {
             }
             Key::Ctrl('d') => self.move_selection(half_page as isize),
             Key::Ctrl('u') => self.move_selection(-(half_page as isize)),
+            Key::Ctrl('j') => self.cycle_workspace(1),
+            Key::Ctrl('k') => self.cycle_workspace(-1),
             Key::Tab => {
                 if self.focus == Focus::List && self.detail_count > 0 {
                     self.focus = Focus::Detail;
@@ -443,7 +441,7 @@ impl Interaction {
             Key::Char('u') => return vec![Action::Undo],
             Key::Ctrl('r') => return vec![Action::Redo],
             Key::Char('q') => return vec![Action::Quit],
-            Key::Char(c @ '1'..='6') => {
+            Key::Char(c @ '1'..='5') => {
                 let index = c as usize - '1' as usize;
                 if let Some(workspace) = Workspace::ALL.get(index) {
                     self.change_workspace(*workspace);
@@ -465,8 +463,8 @@ impl Interaction {
                 self.completion_index = 0;
             }
             Key::Tab => self.accept_command_suggestion(),
-            Key::Ctrl('n') | Key::Down => self.move_completion(1),
-            Key::Ctrl('p') | Key::Up => self.move_completion(-1),
+            Key::Ctrl('n') | Key::Ctrl('j') | Key::Down => self.move_completion(1),
+            Key::Ctrl('p') | Key::Ctrl('k') | Key::Up => self.move_completion(-1),
             Key::Esc => {
                 self.mode = Mode::Normal;
                 self.input.clear();
@@ -599,6 +597,13 @@ impl Interaction {
         self.list_selection = 0;
         self.detail_selection = 0;
         self.pending_g = false;
+    }
+
+    /// Step to the next (`delta > 0`) or previous workspace, wrapping around.
+    fn cycle_workspace(&mut self, delta: isize) {
+        let len = Workspace::ALL.len() as isize;
+        let next = (self.workspace.index() as isize + delta).rem_euclid(len) as usize;
+        self.change_workspace(Workspace::ALL[next]);
     }
 
     fn move_selection(&mut self, delta: isize) {
@@ -892,9 +897,60 @@ mod tests {
         assert_eq!(it.workspace(), Workspace::Applications);
         assert_eq!(it.focus(), Focus::List);
 
+        keys(&mut it, "4");
+        assert_eq!(it.workspace(), Workspace::Config);
+        keys(&mut it, "5");
+        assert_eq!(it.workspace(), Workspace::Help);
+
         keys(&mut it, ":ws apps");
         it.handle_key(Key::Enter);
         assert_eq!(it.workspace(), Workspace::Applications);
+    }
+
+    #[test]
+    fn ctrl_j_and_k_cycle_workspaces_wrapping() {
+        let mut it = interaction(1);
+        assert_eq!(it.workspace(), Workspace::MimeTypes);
+
+        it.handle_key(Key::Ctrl('j'));
+        assert_eq!(it.workspace(), Workspace::Categories);
+        it.handle_key(Key::Ctrl('j'));
+        assert_eq!(it.workspace(), Workspace::Applications);
+        it.handle_key(Key::Ctrl('j'));
+        assert_eq!(it.workspace(), Workspace::Config);
+        it.handle_key(Key::Ctrl('j'));
+        assert_eq!(it.workspace(), Workspace::Help);
+        it.handle_key(Key::Ctrl('j'));
+        assert_eq!(it.workspace(), Workspace::MimeTypes, "wraps forward");
+
+        it.handle_key(Key::Ctrl('k'));
+        assert_eq!(it.workspace(), Workspace::Help, "wraps backward");
+        it.handle_key(Key::Ctrl('k'));
+        assert_eq!(it.workspace(), Workspace::Config);
+    }
+
+    #[test]
+    fn ctrl_j_and_k_in_command_mode_move_the_completion_not_the_workspace() {
+        let mut it = interaction(1);
+        keys(&mut it, ":theme ");
+        assert_eq!(it.mode(), Mode::Command);
+        assert_eq!(it.completion_index(), 0);
+        assert_eq!(
+            it.selected_candidate().as_deref(),
+            Some("theme MELANGE DARK")
+        );
+
+        it.handle_key(Key::Ctrl('j'));
+        assert_eq!(it.completion_index(), 1);
+        assert_eq!(
+            it.selected_candidate().as_deref(),
+            Some("theme GRUVBOX DARK")
+        );
+
+        it.handle_key(Key::Ctrl('k'));
+        assert_eq!(it.completion_index(), 0);
+        assert_eq!(it.workspace(), Workspace::MimeTypes, "workspace untouched");
+        assert_eq!(it.mode(), Mode::Command, "still composing the command");
     }
 
     #[test]

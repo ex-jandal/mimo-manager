@@ -15,7 +15,7 @@
 
 - **Keyboard-first**: Modal, Vim-style navigation (j/k, gg/G, Tab, /, `:`, u/Ctrl+r).
 - **MIME browser**: See all registered MIME types, their associations, and current defaults.
-- **One-key workspaces**: `1` MIME TYPES, `2` SIMPLE, `3` APPLICATIONS, `4` DESKTOP, `5` CONFIG, `6` HELP.
+- **One-key workspaces**: `1` MIME TYPES, `2` SIMPLE, `3` APPLICATIONS, `4` CONFIG, `5` HELP.
 - **SIMPLE mode**: Set defaults for common roles (File manager, Terminal, Web browser, Email, Text editor) and content categories (Audio, Video, Images, Text, Fonts, PDF, Archives, Documents).
 - **Instant apply + undo**: `u` undoes the last change, `Ctrl+r` redoes.
 - **Command palette with autocomplete**: `:set-default`, `:add`, `:remove`, `:reset`, `:filter`, `:ws`, `:open-config`, `:theme`, `:help`, `:quit` (Tab accepts ghost).
@@ -71,7 +71,8 @@ A `.desktop` file (`dev.mimo_manager.MimoManager.desktop`) is installed with the
 
 Launch `mimo_manager` from a terminal or your application launcher. Keys:
 
-- `1-6` switch workspaces
+- `1-5` switch workspaces; `Ctrl+j`/`Ctrl+k` go to the next/previous workspace (in `:` mode they cycle the command list)
+- `4` CONFIG shows the resolved settings; `Enter` opens `config.toml` in `$EDITOR`
 - `j/k`, `↑/↓`, `gg`, `G`, `Ctrl+d`, `Ctrl+u` navigate
 - `Enter` open detail; `Tab` toggle focus
 - `/` filter; `:` command palette; `x` remove; `R` reset

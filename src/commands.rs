@@ -51,7 +51,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         name: "ws",
         aliases: &["workspace"],
         args: "<name>",
-        help: "Switch workspace (mime, apps, desktop, config, simple, help).",
+        help: "Switch workspace (mime, apps, config, simple, help).",
     },
     CommandSpec {
         name: "open-config",
@@ -137,7 +137,15 @@ pub static KEYS: &[KeySpec] = &[
         help: "Reset overrides (detail pane)",
     },
     KeySpec {
-        keys: "1..6",
+        keys: "Ctrl+j / Ctrl+k",
+        help: "Next / previous workspace",
+    },
+    KeySpec {
+        keys: "Ctrl+n / Ctrl+p",
+        help: "In the : command list: next / previous (also Ctrl+j / Ctrl+k)",
+    },
+    KeySpec {
+        keys: "1..5",
         help: "Switch workspace",
     },
     KeySpec {
@@ -147,7 +155,7 @@ pub static KEYS: &[KeySpec] = &[
 ];
 
 /// Values for the argument of `:ws`, mirroring [`crate::interaction::Workspace`].
-pub const WORKSPACES: &[&str] = &["mime", "apps", "desktop", "config", "simple", "help"];
+pub const WORKSPACES: &[&str] = &["mime", "apps", "config", "simple", "help"];
 
 /// The completion candidates for a command-line input (the text after `:`).
 ///
