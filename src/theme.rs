@@ -181,10 +181,12 @@ impl Palette {
             "window {{ background-color: {bg}; color: {fg}; }}\n\
              .mono {{ font-family: \"CaskaydiaCove Nerd Font Mono\", monospace; font-size: {font_scale}; }}\n\
              .mono label {{ font-family: \"CaskaydiaCove Nerd Font Mono\", monospace; }}\n\
+             label {{ color: {fg}; }}\n\
              .pane {{ background-color: {bg}; }}\n\
+             .pane row {{ color: {fg}; }}\n\
              .pane row:selected {{ background-color: {selection}; color: {fg}; }}\n\
              .commandline {{ background-color: {bg_alt}; color: {fg_alt}; padding: 4px 12px; }}\n\
-             .modeline {{ background-color: {bg_alt}; padding: 5px 12px; }}\n\
+             .modeline {{ background-color: {bg_alt}; color: {fg}; padding: 5px 12px; }}\n\
              .workstabs {{ background-color: {bg}; padding: 4px 12px; border-top: 1px solid {selection}; }}\n\
              .detail-title {{ background-color: {bg_alt}; color: {yellow}; padding: 7px 12px; }}\n",
             bg = self.bg,
@@ -389,6 +391,23 @@ mod tests {
         let css = MELANGE_DARK.stylesheet();
         assert!(css.contains(MELANGE_DARK.bg));
         assert!(css.contains(MELANGE_DARK.bg_alt));
+    }
+
+    #[test]
+    fn stylesheet_sets_text_colour_explicitly() {
+        // Without an explicit colour, list rows fall back to the GTK theme and
+        // render black on light themes. Every palette must pin its own.
+        for (name, p) in THEMES {
+            let css = p.stylesheet();
+            assert!(
+                css.contains(&format!("label {{ color: {}; }}", p.fg)),
+                "{name} does not pin the label colour"
+            );
+            assert!(
+                css.contains(&format!(".pane row {{ color: {}; }}", p.fg)),
+                "{name} does not pin the row colour"
+            );
+        }
     }
 
     #[test]
