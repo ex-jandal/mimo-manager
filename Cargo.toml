@@ -1,0 +1,16 @@
+[package]
+name = "mimo_manager"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Keyboard-centric MIME type and default-application manager for Linux"
+readme = "README.md"
+rust-version = "1.93"
+
+[dependencies]
+relm4 = "0.11"
+gtk4 = { version = "0.11", features = ["v4_10"] }
+
+[profile.release]
+lto = "thin"
+strip = true
