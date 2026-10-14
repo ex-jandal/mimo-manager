@@ -4,8 +4,6 @@
 //! [`crate::interaction::Key`] values, feeds them to the state machine, and
 //! carries out the resulting [`crate::interaction::Action`]s.
 
-use std::process::Command as ProcCommand;
-
 use relm4::RelmRemoveAllExt;
 use relm4::gtk::prelude::*;
 use relm4::gtk::{self, gdk, glib};
@@ -330,11 +328,10 @@ impl AppModel {
 
     fn open_config(&mut self) {
         let path = self.paths.config_file();
-        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
-        match ProcCommand::new(editor).arg(&path).spawn() {
-            Ok(_) => self
+        match crate::editor::launch(&path) {
+            Ok(argv) => self
                 .interaction
-                .set_status(Some(format!("opened {}", path.display()))),
+                .set_status(Some(format!("opened {}", argv.join(" ")))),
             Err(error) => self
                 .interaction
                 .set_status(Some(format!("cannot open editor: {error}"))),

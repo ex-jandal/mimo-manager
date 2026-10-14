@@ -9,6 +9,7 @@ pub mod commands;
 pub mod config;
 pub mod desktop;
 pub mod domain;
+pub mod editor;
 pub mod error;
 pub mod interaction;
 pub mod mime;
