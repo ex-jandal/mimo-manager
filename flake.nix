@@ -58,6 +58,7 @@
         default = {
           type = "app";
           program = "${self.packages.${system}.mimo_manager}/bin/mimo_manager";
+          meta.description = "Run mimo_manager";
         };
       });
 
@@ -77,6 +78,20 @@
           RUST_SRC_PATH = "${(pkgsFor system).rustPlatform.rustLibSrc}";
         };
       });
+
+      checks = forAllSystems (
+        system:
+        let
+          pkgs = pkgsFor system;
+        in
+        {
+          hm-module = import ./nix/hm-module-check.nix {
+            inherit pkgs;
+            lib = pkgs.lib;
+          };
+          mimo_manager = self.packages.${system}.mimo_manager;
+        }
+      );
 
       homeManagerModules.default = import ./nix/hm-module.nix self;
       homeManagerModules.mimo_manager = self.homeManagerModules.default;

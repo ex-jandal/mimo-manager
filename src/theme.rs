@@ -51,6 +51,14 @@ pub const MELANGE_DARK: Palette = Palette {
 
 pub const THEME_NAME: &str = "MELANGE DARK";
 
+/// The themes this build knows how to render.
+pub const THEMES: &[&str] = &[THEME_NAME];
+
+/// Whether `name` names a theme this build can render.
+pub fn is_known(name: &str) -> bool {
+    THEMES.contains(&name)
+}
+
 /// UI scale for text and rows, relative to the system default font size.
 ///
 /// Expressed in `em` so it compounds with the user's system scaling rather

@@ -10,13 +10,13 @@ use std::path::Path;
 use serde::Deserialize;
 
 use crate::error::{Error, Result};
-use crate::theme::{ModelineFields, THEME_NAME};
+use crate::theme::{self, ModelineFields, THEME_NAME};
 
 /// The complete configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Theme name shown in the modeline and used for colours.
+    /// Theme to render with. Must name a theme in [`crate::theme::THEMES`].
     pub theme: String,
     /// Ask before destructive operations (remove/reset).
     pub confirm_destructive: bool,
@@ -82,10 +82,21 @@ impl From<ModelineConfig> for ModelineFields {
 impl Config {
     /// Parse configuration from a TOML string.
     pub fn from_toml(source: &str, path: &Path) -> Result<Self> {
-        toml::from_str(source).map_err(|error| Error::Parse {
+        let config: Self = toml::from_str(source).map_err(|error| Error::Parse {
             path: path.to_path_buf(),
             message: error.to_string(),
-        })
+        })?;
+        if !theme::is_known(&config.theme) {
+            return Err(Error::Parse {
+                path: path.to_path_buf(),
+                message: format!(
+                    "unknown theme {:?}; available themes: {}",
+                    config.theme,
+                    theme::THEMES.join(", ")
+                ),
+            });
+        }
+        Ok(config)
     }
 
     /// Load configuration from `path`, applying defaults when it is absent.
@@ -123,7 +134,7 @@ mod tests {
     #[test]
     fn parses_partial_document() {
         let source = r#"
-            theme = "MELANGE LIGHT"
+            theme = "MELANGE DARK"
             confirm_destructive = false
 
             [modeline]
@@ -131,7 +142,7 @@ mod tests {
             theme = true
         "#;
         let config = Config::from_toml(source, Path::new("config.toml")).unwrap();
-        assert_eq!(config.theme, "MELANGE LIGHT");
+        assert_eq!(config.theme, "MELANGE DARK");
         assert!(!config.confirm_destructive);
         assert!(!config.modeline.status);
         assert!(config.modeline.theme);
@@ -139,6 +150,12 @@ mod tests {
             config.modeline.mode,
             "unspecified fields keep their default"
         );
+    }
+
+    #[test]
+    fn unknown_theme_is_an_error() {
+        let error = Config::from_toml("theme = \"MELANGE LIGHT\"", Path::new("config.toml"));
+        assert!(matches!(error, Err(Error::Parse { .. })));
     }
 
     #[test]
