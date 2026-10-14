@@ -1,6 +1,13 @@
-# mimo_manager
+<p align="center">
+  <img src="resources/dev.mimo_manager.MimoManager.svg" alt="mimo_manager icon" width="128" height="128">
+</p>
 
-A keyboard-centric MIME type and default-application manager for Linux. Browse the MIME database, set defaults for roles and categories, and apply changes to `mimeapps.list` instantly with Vim-style navigation.
+<h1 align="center">mimo_manager</h1>
+
+<p align="center">
+  A keyboard-centric MIME type and default-application manager for Linux.<br>
+  Browse the MIME database, set defaults for roles and categories, and apply changes to <code>mimeapps.list</code> instantly with Vim-style navigation.
+</p>
 
 ![SIMPLE workspace showing categories and candidate apps](screenshots/simple.png)
 
