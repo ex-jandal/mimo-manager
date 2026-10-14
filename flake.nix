@@ -37,6 +37,13 @@
             gtk4
           ];
 
+          postInstall = ''
+            install -Dm644 ${./resources/dev.mimo_manager.MimoManager.desktop} \
+              $out/share/applications/dev.mimo_manager.MimoManager.desktop
+            install -Dm644 ${./resources/dev.mimo_manager.MimoManager.svg} \
+              $out/share/icons/hicolor/scalable/apps/dev.mimo_manager.MimoManager.svg
+          '';
+
           meta = with pkgs.lib; {
             description = "Keyboard-centric MIME type and default-application manager for Linux";
             license = with licenses; [
