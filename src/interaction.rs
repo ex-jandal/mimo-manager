@@ -153,6 +153,8 @@ pub struct Interaction {
     detail_selection: usize,
     list_count: usize,
     detail_count: usize,
+    /// Approximate number of rows visible in a pane; drives half-page jumps.
+    page_rows: usize,
     pending_g: bool,
     pending: Option<Pending>,
     status: Option<String>,
@@ -173,6 +175,7 @@ impl Default for Interaction {
             detail_selection: 0,
             list_count: 0,
             detail_count: 0,
+            page_rows: 24,
             pending_g: false,
             pending: None,
             status: None,
@@ -218,6 +221,11 @@ impl Interaction {
     /// Whether destructive operations ask for confirmation first.
     pub fn set_confirm_destructive(&mut self, confirm: bool) {
         self.confirm_destructive = confirm;
+    }
+
+    /// Tell the interface how many rows fit in a pane, for half-page jumps.
+    pub fn set_page_rows(&mut self, rows: usize) {
+        self.page_rows = rows.max(1);
     }
 
     /// The selection index of the focused pane.
@@ -301,7 +309,7 @@ impl Interaction {
 
     fn normal(&mut self, key: Key) -> Vec<Action> {
         self.status = None;
-        let half_page = (self.count() / 2).max(1);
+        let half_page = (self.page_rows / 2).max(1);
 
         match key {
             Key::Char(':') => {
@@ -629,6 +637,32 @@ mod tests {
         keys(&mut it, "j");
         assert_eq!(it.selection_label(), "2/10");
         assert_eq!(it.count_label(), "10");
+    }
+
+    #[test]
+    fn control_d_and_u_move_half_a_page() {
+        let mut it = Interaction::new();
+        it.set_counts(1000, 0);
+        it.set_page_rows(20);
+        it.handle_key(Key::Ctrl('d'));
+        assert_eq!(
+            it.selection(),
+            10,
+            "half of a 20-row page, not half the list"
+        );
+        it.handle_key(Key::Ctrl('d'));
+        assert_eq!(it.selection(), 20);
+        it.handle_key(Key::Ctrl('u'));
+        assert_eq!(it.selection(), 10);
+    }
+
+    #[test]
+    fn half_page_jump_never_moves_by_zero() {
+        let mut it = Interaction::new();
+        it.set_counts(1000, 0);
+        it.set_page_rows(1);
+        it.handle_key(Key::Ctrl('d'));
+        assert_eq!(it.selection(), 1, "at least one row even on a tiny page");
     }
 
     #[test]
