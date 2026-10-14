@@ -156,6 +156,8 @@ pub struct Interaction {
     pending_g: bool,
     pending: Option<Pending>,
     status: Option<String>,
+    /// Ask before destructive operations (remove/reset).
+    confirm_destructive: bool,
 }
 
 impl Default for Interaction {
@@ -174,6 +176,7 @@ impl Default for Interaction {
             pending_g: false,
             pending: None,
             status: None,
+            confirm_destructive: true,
         }
     }
 }
@@ -210,6 +213,11 @@ impl Interaction {
     /// Replace the transient status message.
     pub fn set_status(&mut self, status: Option<String>) {
         self.status = status;
+    }
+
+    /// Whether destructive operations ask for confirmation first.
+    pub fn set_confirm_destructive(&mut self, confirm: bool) {
+        self.confirm_destructive = confirm;
     }
 
     /// The selection index of the focused pane.
@@ -348,10 +356,13 @@ impl Interaction {
                 }
             }
             Key::Char('x') if self.focus == Focus::Detail => {
-                self.start_confirm(Pending::Selected(DestructiveKind::Remove));
+                return self.destructive(
+                    Pending::Selected(DestructiveKind::Remove),
+                    Action::RemoveSelected,
+                );
             }
             Key::Char('R') if self.focus == Focus::Detail => {
-                self.start_confirm(Pending::Selected(DestructiveKind::Reset));
+                return self.destructive(Pending::Selected(DestructiveKind::Reset), Action::Reset);
             }
             Key::Char('u') => return vec![Action::Undo],
             Key::Ctrl('r') => return vec![Action::Redo],
@@ -451,13 +462,10 @@ impl Interaction {
             Command::SetDefault(app) => vec![Action::SetDefault(app)],
             Command::Add(app) => vec![Action::Add(app)],
             Command::Remove(app) => {
-                self.start_confirm(Pending::Command(Command::Remove(app)));
-                Vec::new()
+                let pending = Pending::Command(Command::Remove(app.clone()));
+                self.destructive(pending, Action::Remove(app))
             }
-            Command::Reset => {
-                self.start_confirm(Pending::Command(Command::Reset));
-                Vec::new()
-            }
+            Command::Reset => self.destructive(Pending::Command(Command::Reset), Action::Reset),
             Command::Filter(text) => {
                 self.filter = text;
                 self.list_selection = 0;
@@ -484,6 +492,16 @@ impl Interaction {
     fn start_confirm(&mut self, pending: Pending) {
         self.mode = Mode::Confirm;
         self.pending = Some(pending);
+    }
+
+    /// Either ask for confirmation or return the direct action, per config.
+    fn destructive(&mut self, pending: Pending, direct: Action) -> Vec<Action> {
+        if self.confirm_destructive {
+            self.start_confirm(pending);
+            Vec::new()
+        } else {
+            vec![direct]
+        }
     }
 
     fn change_workspace(&mut self, workspace: Workspace) {
@@ -675,6 +693,27 @@ mod tests {
         assert_eq!(it.mode(), Mode::Confirm);
         assert_eq!(keys(&mut it, "n"), Vec::<Action>::new());
         assert_eq!(it.mode(), Mode::Normal);
+    }
+
+    #[test]
+    fn destructive_without_confirmation_acts_immediately() {
+        let mut it = Interaction::new();
+        it.set_confirm_destructive(false);
+        it.set_counts(1, 1);
+        it.handle_key(Key::Tab); // focus detail
+        assert_eq!(it.focus(), Focus::Detail);
+
+        assert_eq!(keys(&mut it, "x"), vec![Action::RemoveSelected]);
+        assert_eq!(it.mode(), Mode::Normal);
+        assert_eq!(keys(&mut it, "R"), vec![Action::Reset]);
+        assert_eq!(it.mode(), Mode::Normal);
+
+        let mut actions = Vec::new();
+        for c in ":reset".chars() {
+            actions.extend(it.handle_key(Key::Char(c)));
+        }
+        actions.extend(it.handle_key(Key::Enter));
+        assert_eq!(actions, vec![Action::Reset]);
     }
 
     #[test]

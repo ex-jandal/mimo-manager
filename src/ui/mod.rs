@@ -12,6 +12,7 @@ use relm4::gtk::{self, gdk, glib};
 use relm4::prelude::*;
 
 use crate::assoc::{AssocEdit, Associations, MimeappsFile};
+use crate::config::Config;
 use crate::desktop::discovery::{DiscoveryReport, discover};
 use crate::interaction::{Action, Interaction, Key as UiKey, Mode, Workspace};
 use crate::mime::MimeDatabase;
@@ -21,6 +22,7 @@ use crate::xdg::Paths;
 
 struct AppModel {
     paths: Paths,
+    config: Config,
     db: MimeDatabase,
     apps: DiscoveryReport,
     assoc: Associations,
@@ -125,15 +127,19 @@ impl SimpleComponent for AppModel {
 
         let widgets = view_output!();
 
-        let (paths, db, apps, assoc, session, load_error) = load_world();
+        let (paths, config, db, apps, assoc, session, load_error) = load_world();
+
+        let mut interaction = Interaction::new();
+        interaction.set_confirm_destructive(config.confirm_destructive);
 
         let mut model = AppModel {
             paths,
+            config,
             db,
             apps,
             assoc,
             session,
-            interaction: Interaction::new(),
+            interaction,
             list_items: Vec::new(),
             list_app_indices: Vec::new(),
             detail_items: Vec::new(),
@@ -147,6 +153,7 @@ impl SimpleComponent for AppModel {
             detail_title: widgets.detail_title.clone(),
             modeline_label: widgets.modeline_label.clone(),
         };
+        model.modeline_fields = model.config.modeline.clone().into();
 
         install_key_controller(&root, sender.clone());
         model.refresh();
@@ -442,7 +449,7 @@ impl AppModel {
             default: format!("DEFAULT {default}"),
             scope: format!("SCOPE {scope}"),
             status,
-            theme: theme::THEME_NAME.to_string(),
+            theme: self.config.theme.clone(),
         };
         self.modeline_label
             .set_markup(&theme::render_markup(&self.modeline_fields, &modeline));
@@ -478,6 +485,7 @@ fn describe(edit: &AssocEdit) -> &'static str {
 
 fn load_world() -> (
     Paths,
+    Config,
     MimeDatabase,
     DiscoveryReport,
     Associations,
@@ -491,6 +499,7 @@ fn load_world() -> (
             let session = Session::new(paths.clone());
             return (
                 paths,
+                Config::default(),
                 MimeDatabase::default(),
                 DiscoveryReport::default(),
                 Associations::default(),
@@ -501,6 +510,13 @@ fn load_world() -> (
     };
 
     let mut error = None;
+    let config = match Config::load(&paths.config_file()) {
+        Ok(config) => config,
+        Err(e) => {
+            error = Some(e.to_string());
+            Config::default()
+        }
+    };
     let db = match MimeDatabase::load(&paths) {
         Ok(db) => db,
         Err(e) => {
@@ -512,7 +528,7 @@ fn load_world() -> (
     let assoc = Associations::load(&paths).unwrap_or_default();
     let session = Session::new(paths.clone());
 
-    (paths, db, apps, assoc, session, error)
+    (paths, config, db, apps, assoc, session, error)
 }
 
 fn fill_rows(list_box: &gtk::ListBox, items: &[String], selection: usize) {
