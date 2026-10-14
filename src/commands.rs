@@ -146,23 +146,52 @@ pub static KEYS: &[KeySpec] = &[
     },
 ];
 
-/// The completion remainder for a partial command name, if one is unambiguous.
+/// Values for the argument of `:ws`, mirroring [`crate::interaction::Workspace`].
+pub const WORKSPACES: &[&str] = &["mime", "apps", "desktop", "config", "simple", "help"];
+
+/// The completion candidates for a command-line input (the text after `:`).
 ///
-/// Returns `None` when `typed` is empty, already complete, or has moved on to
-/// an argument.
-pub fn complete(typed: &str) -> Option<String> {
-    if typed.is_empty() {
-        return None;
+/// Returns full re-insertable strings: a bare command name (with a trailing
+/// space when it takes an argument), or `command value` for an enumerated
+/// argument such as `:theme` or `:ws`.
+pub fn candidates(typed: &str) -> Vec<String> {
+    match typed.split_once(char::is_whitespace) {
+        None => COMMANDS
+            .iter()
+            .filter(|spec| {
+                spec.name.starts_with(typed)
+                    || spec.aliases.iter().any(|alias| alias.starts_with(typed))
+            })
+            .map(|spec| {
+                if spec.args.is_empty() {
+                    spec.name.to_string()
+                } else {
+                    format!("{} ", spec.name)
+                }
+            })
+            .collect(),
+        Some((command, argument)) => argument_candidates(command, argument),
     }
-    for spec in COMMANDS {
-        if spec.name == typed || spec.aliases.contains(&typed) {
-            return None;
-        }
-        if spec.name.starts_with(typed) {
-            return Some(spec.name[typed.len()..].to_string());
-        }
-    }
-    None
+}
+
+fn argument_candidates(command: &str, argument: &str) -> Vec<String> {
+    let Some(spec) = COMMANDS
+        .iter()
+        .find(|spec| spec.name == command || spec.aliases.contains(&command))
+    else {
+        return Vec::new();
+    };
+    let values: Vec<&str> = match spec.name {
+        "theme" => crate::theme::theme_names(),
+        "ws" => WORKSPACES.to_vec(),
+        _ => return Vec::new(),
+    };
+    let prefix = argument.to_lowercase();
+    values
+        .into_iter()
+        .filter(|value| value.to_lowercase().starts_with(&prefix))
+        .map(|value| format!("{} {}", spec.name, value))
+        .collect()
 }
 
 #[cfg(test)]
@@ -170,19 +199,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn completes_a_unique_prefix() {
-        assert_eq!(complete("set-d").as_deref(), Some("efault"));
-        assert_eq!(complete("set-default"), None);
+    fn completes_a_command_name_prefix() {
+        assert_eq!(candidates("set-d"), vec!["set-default "]);
+        assert_eq!(candidates("rm"), vec!["remove "]);
+        assert!(candidates("re").contains(&"reset".to_string()));
     }
 
     #[test]
-    fn a_full_alias_is_not_completed() {
-        assert_eq!(complete("rm"), None);
-        assert_eq!(complete(""), None);
+    fn empty_input_lists_every_command() {
+        assert_eq!(candidates("").len(), COMMANDS.len());
     }
 
     #[test]
-    fn unknown_prefix_has_no_completion() {
-        assert_eq!(complete("zzz"), None);
+    fn command_alias_prefix_completes_to_canonical_name() {
+        assert!(candidates("wor").contains(&"ws ".to_string()));
+    }
+
+    #[test]
+    fn theme_argument_lists_theme_names() {
+        let all = candidates("theme ");
+        assert_eq!(all.len(), crate::theme::theme_names().len());
+        assert!(all.iter().all(|c| c.starts_with("theme ")));
+        assert_eq!(candidates("theme NOR"), vec!["theme NORD"]);
+        assert!(
+            candidates("theme ")
+                .iter()
+                .any(|c| c == "theme GRUVBOX DARK")
+        );
+    }
+
+    #[test]
+    fn ws_argument_lists_workspaces() {
+        assert_eq!(candidates("ws a"), vec!["ws apps"]);
+        assert!(candidates("ws ").contains(&"ws help".to_string()));
+    }
+
+    #[test]
+    fn unknown_prefix_or_argument_has_no_candidates() {
+        assert!(candidates("zzz").is_empty());
+        assert!(candidates("set-default foo").is_empty());
+        assert!(candidates("nope x").is_empty());
     }
 }

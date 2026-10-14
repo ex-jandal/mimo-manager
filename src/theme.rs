@@ -188,6 +188,9 @@ impl Palette {
              .commandline {{ background-color: {bg_alt}; color: {fg_alt}; padding: 4px 12px; }}\n\
              .modeline {{ background-color: {bg_alt}; color: {fg}; padding: 5px 12px; }}\n\
              .workstabs {{ background-color: {bg}; padding: 4px 12px; border-top: 1px solid {selection}; }}\n\
+             .pmenu {{ background-color: {bg_alt}; }}\n\
+             .pmenu row {{ color: {fg}; padding: 4px 12px; }}\n\
+             .pmenu row:selected {{ background-color: {selection}; color: {fg}; }}\n\
              .detail-title {{ background-color: {bg_alt}; color: {yellow}; padding: 7px 12px; }}\n",
             bg = self.bg,
             bg_alt = self.bg_alt,

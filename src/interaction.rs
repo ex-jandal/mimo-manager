@@ -171,6 +171,8 @@ pub struct Interaction {
     status: Option<String>,
     /// Ask before destructive operations (remove/reset).
     confirm_destructive: bool,
+    /// Highlighted row in the command-line completion dropdown.
+    completion_index: usize,
 }
 
 impl Default for Interaction {
@@ -191,6 +193,7 @@ impl Default for Interaction {
             pending: None,
             status: None,
             confirm_destructive: true,
+            completion_index: 0,
         }
     }
 }
@@ -216,19 +219,56 @@ impl Interaction {
         &self.input
     }
 
-    /// The remainder that would complete the command currently being typed,
-    /// for rendering as inline ghost text. `None` once an argument is present.
-    pub fn command_suggestion(&self) -> Option<String> {
-        if self.mode != Mode::Command || self.input.contains(char::is_whitespace) {
-            return None;
+    /// The completion candidates for the current command line, for the dropdown.
+    pub fn command_candidates(&self) -> Vec<String> {
+        if self.mode != Mode::Command {
+            return Vec::new();
         }
-        crate::commands::complete(&self.input)
+        crate::commands::candidates(&self.input)
     }
 
-    /// Accept the inline command suggestion, if any.
+    /// The highlighted dropdown row, clamped to the current candidate set.
+    pub fn selected_candidate(&self) -> Option<String> {
+        let candidates = self.command_candidates();
+        if candidates.is_empty() {
+            return None;
+        }
+        Some(candidates[self.completion_index.min(candidates.len() - 1)].clone())
+    }
+
+    /// Index of the highlighted dropdown row.
+    pub fn completion_index(&self) -> usize {
+        self.completion_index
+    }
+
+    /// Move the dropdown highlight, wrapping around.
+    pub fn move_completion(&mut self, delta: isize) {
+        let len = self.command_candidates().len();
+        if len == 0 {
+            self.completion_index = 0;
+            return;
+        }
+        self.completion_index =
+            (self.completion_index as isize + delta).rem_euclid(len as isize) as usize;
+    }
+
+    /// The remainder that would complete the highlighted candidate, rendered as
+    /// inline ghost text. `None` when the input already is the candidate.
+    pub fn command_suggestion(&self) -> Option<String> {
+        if self.mode != Mode::Command || self.input.is_empty() {
+            return None;
+        }
+        self.selected_candidate()?
+            .strip_prefix(&self.input)
+            .map(str::to_string)
+            .filter(|remainder| !remainder.is_empty())
+    }
+
+    /// Accept the highlighted candidate into the input buffer.
     pub fn accept_command_suggestion(&mut self) {
-        if let Some(remainder) = self.command_suggestion() {
-            self.input.push_str(&remainder);
+        if let Some(candidate) = self.selected_candidate() {
+            self.input = candidate;
+            self.completion_index = 0;
         }
     }
 
@@ -342,6 +382,7 @@ impl Interaction {
             Key::Char(':') => {
                 self.mode = Mode::Command;
                 self.input.clear();
+                self.completion_index = 0;
                 self.pending_g = false;
             }
             Key::Char('/') => self.begin_search(),
@@ -415,18 +456,26 @@ impl Interaction {
 
     fn command(&mut self, key: Key) -> Vec<Action> {
         match key {
-            Key::Char(c) => self.input.push(c),
+            Key::Char(c) => {
+                self.input.push(c);
+                self.completion_index = 0;
+            }
             Key::Backspace => {
                 self.input.pop();
+                self.completion_index = 0;
             }
             Key::Tab => self.accept_command_suggestion(),
+            Key::Ctrl('n') | Key::Down => self.move_completion(1),
+            Key::Ctrl('p') | Key::Up => self.move_completion(-1),
             Key::Esc => {
                 self.mode = Mode::Normal;
                 self.input.clear();
+                self.completion_index = 0;
             }
             Key::Enter => {
                 let input = std::mem::take(&mut self.input);
                 self.mode = Mode::Normal;
+                self.completion_index = 0;
                 return match parse_command(&input) {
                     Ok(Some(command)) => self.apply_command(command),
                     Ok(None) => Vec::new(),
@@ -886,16 +935,54 @@ mod tests {
     fn command_autocomplete_completes_and_accepts() {
         let mut it = interaction(1);
         keys(&mut it, ":set-d");
-        assert_eq!(it.command_suggestion().as_deref(), Some("efault"));
+        assert_eq!(it.command_candidates(), vec!["set-default "]);
+        assert_eq!(it.command_suggestion().as_deref(), Some("efault "));
         it.handle_key(Key::Tab);
-        assert_eq!(it.input(), "set-default");
+        assert_eq!(it.input(), "set-default ");
 
         keys(&mut it, " x");
-        assert_eq!(
-            it.command_suggestion(),
-            None,
+        assert!(
+            it.command_candidates().is_empty(),
             "no completion once an argument is present"
         );
+        assert_eq!(it.command_suggestion(), None);
+    }
+
+    #[test]
+    fn command_dropdown_lists_theme_names_and_navigates() {
+        let mut it = interaction(1);
+        keys(&mut it, ":theme ");
+        let themes = it.command_candidates();
+        assert_eq!(themes.len(), crate::theme::theme_names().len());
+        assert_eq!(
+            it.selected_candidate().as_deref(),
+            Some("theme MELANGE DARK")
+        );
+
+        it.handle_key(Key::Ctrl('n'));
+        assert_eq!(it.completion_index(), 1);
+        assert_eq!(
+            it.selected_candidate().as_deref(),
+            Some("theme GRUVBOX DARK")
+        );
+
+        it.handle_key(Key::Ctrl('p'));
+        assert_eq!(
+            it.selected_candidate().as_deref(),
+            Some("theme MELANGE DARK")
+        );
+
+        it.handle_key(Key::Ctrl('p'));
+        assert_eq!(
+            it.selected_candidate().as_deref(),
+            Some("theme TOKYO NIGHT"),
+            "navigation wraps around"
+        );
+
+        keys(&mut it, "NOR");
+        assert_eq!(it.command_candidates(), vec!["theme NORD"]);
+        it.handle_key(Key::Tab);
+        assert_eq!(it.input(), "theme NORD");
     }
 
     #[test]
