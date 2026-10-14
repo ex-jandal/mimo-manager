@@ -7,9 +7,22 @@ description = "Keyboard-centric MIME type and default-application manager for Li
 readme = "README.md"
 rust-version = "1.93"
 
+[lib]
+name = "mimo_manager"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mimo_manager"
+path = "src/main.rs"
+
 [dependencies]
 relm4 = "0.11"
 gtk4 = { version = "0.11", features = ["v4_10"] }
+gio = "0.22"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
 
 [profile.release]
 lto = "thin"
