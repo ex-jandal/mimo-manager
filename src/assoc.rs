@@ -222,6 +222,14 @@ impl MimeappsFile {
         settings
     }
 
+    /// Whether this file sets any association for `mime` in a modelled section.
+    pub fn sets(&self, mime: &str) -> bool {
+        let settings = self.settings();
+        settings.defaults.contains_key(mime)
+            || settings.added.contains_key(mime)
+            || settings.removed.contains_key(mime)
+    }
+
     /// Replace `key` in a section, creating section and entry as needed.
     fn set(&mut self, section_name: &str, key: &str, values: Vec<String>) {
         self.ensure_section(section_name).set(key, values);
