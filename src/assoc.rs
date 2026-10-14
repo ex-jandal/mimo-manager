@@ -276,30 +276,36 @@ impl MimeappsFile {
 
     /// Save atomically to `path`, creating parent directories.
     pub fn save(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|source| Error::Io {
-                path: parent.to_path_buf(),
-                source,
-            })?;
-        }
-        let temp = temp_path(path);
-        let text = self.render();
-        let write = || -> std::io::Result<()> {
-            let mut file = fs::File::create(&temp)?;
-            file.write_all(text.as_bytes())?;
-            file.sync_all()?;
-            fs::rename(&temp, path)?;
-            Ok(())
-        };
-        if let Err(source) = write() {
-            let _ = fs::remove_file(&temp);
-            return Err(Error::Io {
-                path: path.to_path_buf(),
-                source,
-            });
-        }
-        Ok(())
+        write_file_atomic(path, &self.render())
     }
+}
+
+/// Write `text` to `path` atomically, creating parent directories.
+///
+/// The data is written to a sibling temp file, flushed, then `rename`d into
+/// place so a crash cannot leave a partially written file.
+pub fn write_file_atomic(path: &Path, text: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|source| Error::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    let temp = temp_path(path);
+    let attempt = || -> std::io::Result<()> {
+        let mut file = fs::File::create(&temp)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&temp, path)
+    };
+    if let Err(source) = attempt() {
+        let _ = fs::remove_file(&temp);
+        return Err(Error::Io {
+            path: path.to_path_buf(),
+            source,
+        });
+    }
+    Ok(())
 }
 
 impl Section {
