@@ -47,6 +47,7 @@ struct AppModel {
     detail_box: gtk::ListBox,
     detail_scroll: gtk::ScrolledWindow,
     input_label: gtk::Label,
+    completion_box: gtk::ListBox,
     detail_title: gtk::Label,
     modeline_left: gtk::Label,
     modeline_right: gtk::Label,
@@ -115,6 +116,12 @@ impl SimpleComponent for AppModel {
                             },
                         },
                     },
+                },
+
+                #[name(completion_box)]
+                gtk::ListBox {
+                    set_selection_mode: gtk::SelectionMode::Single,
+                    add_css_class: "pmenu",
                 },
 
                 #[name(input_label)]
@@ -191,6 +198,7 @@ impl SimpleComponent for AppModel {
             detail_box: widgets.detail_box.clone(),
             detail_scroll: widgets.detail_scroll.clone(),
             input_label: widgets.input_label.clone(),
+            completion_box: widgets.completion_box.clone(),
             detail_title: widgets.detail_title.clone(),
             modeline_left: widgets.modeline_left.clone(),
             modeline_right: widgets.modeline_right.clone(),
@@ -392,7 +400,23 @@ impl AppModel {
         self.update_page_rows();
         self.update_modeline();
         self.update_input_line();
+        self.update_completion();
         self.update_workspace_tabs();
+    }
+
+    /// Show the Neovim-style completion dropdown while typing a command.
+    fn update_completion(&mut self) {
+        let candidates = self.interaction.command_candidates();
+        let visible = !candidates.is_empty();
+        self.completion_box.set_visible(visible);
+        if !visible {
+            return;
+        }
+        fill_rows(&self.completion_box, &candidates);
+        let index = self.interaction.completion_index() as i32;
+        if let Some(row) = self.completion_box.row_at_index(index) {
+            self.completion_box.select_row(Some(&row));
+        }
     }
 
     /// Render the workspace tab strip, highlighting the active workspace.
