@@ -8,8 +8,10 @@ pub mod assoc;
 pub mod desktop;
 pub mod domain;
 pub mod error;
+pub mod interaction;
 pub mod mime;
 pub mod queries;
+pub mod session;
 pub mod ui;
 pub mod xdg;
 
