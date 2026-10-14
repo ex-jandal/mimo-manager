@@ -45,6 +45,18 @@ impl Session {
         Ok(())
     }
 
+    /// Apply several edits as a single undoable step.
+    pub fn apply_batch(&mut self, edits: &[AssocEdit]) -> Result<()> {
+        if edits.is_empty() {
+            return Ok(());
+        }
+        let previous = self.snapshot()?;
+        assoc::apply_all(&self.paths, edits)?;
+        self.undo.push(previous);
+        self.redo.clear();
+        Ok(())
+    }
+
     /// Undo the most recent write. Returns whether anything changed.
     pub fn undo(&mut self) -> Result<bool> {
         let Some(previous) = self.undo.pop() else {
@@ -151,6 +163,33 @@ mod tests {
         let (_tmp, mut session) = session();
         assert!(!session.undo().unwrap());
         assert!(!session.redo().unwrap());
+    }
+
+    #[test]
+    fn batch_applies_once_and_undoes_once() {
+        let (_tmp, mut session) = session();
+        let edits = [
+            AssocEdit::SetDefault {
+                mime: "audio/mpeg".into(),
+                app: "a.desktop".into(),
+            },
+            AssocEdit::SetDefault {
+                mime: "audio/x-wav".into(),
+                app: "a.desktop".into(),
+            },
+        ];
+        session.apply_batch(&edits).unwrap();
+        assert_eq!(session.undo_depth(), 1, "a batch is one undo step");
+
+        let text = fs::read_to_string(session.target()).unwrap();
+        assert!(text.contains("audio/mpeg=a.desktop;"));
+        assert!(text.contains("audio/x-wav=a.desktop;"));
+
+        session.undo().unwrap();
+        assert!(
+            !session.target().exists(),
+            "one undo reverts the whole batch"
+        );
     }
 
     #[test]

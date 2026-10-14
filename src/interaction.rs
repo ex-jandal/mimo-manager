@@ -12,14 +12,18 @@ pub enum Workspace {
     Applications,
     Desktop,
     Config,
+    Categories,
+    Help,
 }
 
 impl Workspace {
-    pub const ALL: [Workspace; 4] = [
+    pub const ALL: [Workspace; 6] = [
         Workspace::MimeTypes,
+        Workspace::Categories,
         Workspace::Applications,
         Workspace::Desktop,
         Workspace::Config,
+        Workspace::Help,
     ];
 
     pub fn label(self) -> &'static str {
@@ -28,6 +32,8 @@ impl Workspace {
             Workspace::Applications => "APPLICATIONS",
             Workspace::Desktop => "DESKTOP",
             Workspace::Config => "CONFIG",
+            Workspace::Categories => "SIMPLE",
+            Workspace::Help => "HELP",
         }
     }
 
@@ -37,6 +43,8 @@ impl Workspace {
             "a" | "apps" | "applications" => Some(Workspace::Applications),
             "d" | "desktop" => Some(Workspace::Desktop),
             "c" | "config" => Some(Workspace::Config),
+            "s" | "simple" | "cat" | "categories" => Some(Workspace::Categories),
+            "h" | "help" | "?" => Some(Workspace::Help),
             _ => None,
         }
     }
@@ -91,6 +99,8 @@ pub enum Key {
 pub enum Action {
     /// Set the default app (command supplied an app id).
     SetDefault(String),
+    /// Set the default app for every member of the selected simple entry.
+    SetDefaultFor(String),
     /// Add an association (command supplied an app id).
     Add(String),
     /// Remove an association (command supplied an app id).
@@ -128,6 +138,7 @@ pub enum Command {
     Workspace(Workspace),
     OpenConfig,
     Theme(String),
+    Help,
     Quit,
 }
 
@@ -203,6 +214,22 @@ impl Interaction {
 
     pub fn input(&self) -> &str {
         &self.input
+    }
+
+    /// The remainder that would complete the command currently being typed,
+    /// for rendering as inline ghost text. `None` once an argument is present.
+    pub fn command_suggestion(&self) -> Option<String> {
+        if self.mode != Mode::Command || self.input.contains(char::is_whitespace) {
+            return None;
+        }
+        crate::commands::complete(&self.input)
+    }
+
+    /// Accept the inline command suggestion, if any.
+    pub fn accept_command_suggestion(&mut self) {
+        if let Some(remainder) = self.command_suggestion() {
+            self.input.push_str(&remainder);
+        }
     }
 
     pub fn filter(&self) -> &str {
@@ -375,7 +402,7 @@ impl Interaction {
             Key::Char('u') => return vec![Action::Undo],
             Key::Ctrl('r') => return vec![Action::Redo],
             Key::Char('q') => return vec![Action::Quit],
-            Key::Char(c @ '1'..='4') => {
+            Key::Char(c @ '1'..='6') => {
                 let index = c as usize - '1' as usize;
                 if let Some(workspace) = Workspace::ALL.get(index) {
                     self.change_workspace(*workspace);
@@ -392,6 +419,7 @@ impl Interaction {
             Key::Backspace => {
                 self.input.pop();
             }
+            Key::Tab => self.accept_command_suggestion(),
             Key::Esc => {
                 self.mode = Mode::Normal;
                 self.input.clear();
@@ -485,6 +513,10 @@ impl Interaction {
             }
             Command::OpenConfig => vec![Action::OpenConfig],
             Command::Theme(name) => vec![Action::SetTheme(name)],
+            Command::Help => {
+                self.change_workspace(Workspace::Help);
+                Vec::new()
+            }
             Command::Quit => vec![Action::Quit],
         }
     }
@@ -582,6 +614,7 @@ pub fn parse_command(input: &str) -> std::result::Result<Option<Command>, String
         }
         "open-config" | "config" => Command::OpenConfig,
         "theme" => Command::Theme(require_arg(name)?),
+        "help" | "h" | "?" => Command::Help,
         "q" | "quit" => Command::Quit,
         _ => return Err(format!("unknown command: {name}")),
     };
@@ -807,7 +840,7 @@ mod tests {
     fn workspaces_switch_by_number_and_command() {
         let mut it = interaction(1);
         keys(&mut it, "3");
-        assert_eq!(it.workspace(), Workspace::Desktop);
+        assert_eq!(it.workspace(), Workspace::Applications);
         assert_eq!(it.focus(), Focus::List);
 
         keys(&mut it, ":ws apps");
@@ -828,5 +861,51 @@ mod tests {
         );
         assert!(parse_command("set-default").is_err());
         assert!(parse_command("ws bogus").is_err());
+    }
+
+    #[test]
+    fn command_table_matches_the_parser() {
+        for spec in crate::commands::COMMANDS {
+            for name in std::iter::once(spec.name).chain(spec.aliases.iter().copied()) {
+                let line = if spec.args.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{name} ARG")
+                };
+                if let Err(message) = parse_command(&line) {
+                    assert!(
+                        !message.contains("unknown command"),
+                        "{name:?} in the command table is not recognised: {message}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn command_autocomplete_completes_and_accepts() {
+        let mut it = interaction(1);
+        keys(&mut it, ":set-d");
+        assert_eq!(it.command_suggestion().as_deref(), Some("efault"));
+        it.handle_key(Key::Tab);
+        assert_eq!(it.input(), "set-default");
+
+        keys(&mut it, " x");
+        assert_eq!(
+            it.command_suggestion(),
+            None,
+            "no completion once an argument is present"
+        );
+    }
+
+    #[test]
+    fn help_command_opens_the_help_workspace() {
+        let mut it = interaction(1);
+        keys(&mut it, ":help");
+        it.handle_key(Key::Enter);
+        assert_eq!(it.workspace(), Workspace::Help);
+
+        keys(&mut it, "2");
+        assert_eq!(it.workspace(), Workspace::Categories);
     }
 }
