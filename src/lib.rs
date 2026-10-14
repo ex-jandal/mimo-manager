@@ -12,6 +12,7 @@ pub mod interaction;
 pub mod mime;
 pub mod queries;
 pub mod session;
+pub mod theme;
 pub mod ui;
 pub mod xdg;
 
