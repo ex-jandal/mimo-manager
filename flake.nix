@@ -77,5 +77,8 @@
           RUST_SRC_PATH = "${(pkgsFor system).rustPlatform.rustLibSrc}";
         };
       });
+
+      homeManagerModules.default = import ./nix/hm-module.nix self;
+      homeManagerModules.mimo_manager = self.homeManagerModules.default;
     };
 }
