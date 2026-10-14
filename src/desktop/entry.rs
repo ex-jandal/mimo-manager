@@ -88,11 +88,77 @@ fn lookup<'a>(entries: &'a [IniEntry], key: &str) -> Option<&'a str> {
         .map(|e| e.value.as_str())
 }
 
+/// The current locale, from `LC_ALL`/`LC_MESSAGES`/`LANG`, with any `.ENCODING`
+/// suffix stripped. `C`/`POSIX`/unset means no locale.
+pub fn system_locale() -> Option<String> {
+    for var in ["LC_ALL", "LC_MESSAGES", "LANG"] {
+        let Ok(value) = std::env::var(var) else {
+            continue;
+        };
+        if value.is_empty() || value == "C" || value == "POSIX" {
+            continue;
+        }
+        let base = value.split('.').next().unwrap_or("").trim();
+        if !base.is_empty() {
+            return Some(base.to_string());
+        }
+    }
+    None
+}
+
+/// Locale keys to try, most specific first, per the desktop entry spec.
+fn locale_candidates(locale: &str) -> Vec<String> {
+    let (base, modifier) = match locale.split_once('@') {
+        Some((base, modifier)) => (base, Some(modifier)),
+        None => (locale, None),
+    };
+    let (language, country) = match base.split_once('_') {
+        Some((language, country)) => (language, Some(country)),
+        None => (base, None),
+    };
+    let mut candidates = Vec::new();
+    match (country, modifier) {
+        (Some(country), Some(modifier)) => {
+            candidates.push(format!("{language}_{country}@{modifier}"));
+            candidates.push(format!("{language}_{country}"));
+            candidates.push(format!("{language}@{modifier}"));
+        }
+        (Some(country), None) => candidates.push(format!("{language}_{country}")),
+        (None, Some(modifier)) => candidates.push(format!("{language}@{modifier}")),
+        (None, None) => {}
+    }
+    candidates.push(language.to_string());
+    candidates
+}
+
+/// Look up `key`, preferring the value localized for `locale`, then the plain
+/// unlocalized value. Never returns an unrelated locale (the previous bug).
+fn lookup_for_locale<'a>(
+    entries: &'a [IniEntry],
+    key: &str,
+    locale: Option<&str>,
+) -> Option<&'a str> {
+    if let Some(locale) = locale {
+        for candidate in locale_candidates(locale) {
+            if let Some(value) = entries
+                .iter()
+                .find(|e| {
+                    e.key == key
+                        && e.locale
+                            .as_deref()
+                            .is_some_and(|l| l.eq_ignore_ascii_case(&candidate))
+                })
+                .map(|e| e.value.as_str())
+            {
+                return Some(value);
+            }
+        }
+    }
+    lookup(entries, key)
+}
+
 fn lookup_localized<'a>(entries: &'a [IniEntry], key: &str) -> Option<&'a str> {
-    entries
-        .iter()
-        .find(|e| e.key == key)
-        .map(|e| e.value.as_str())
+    lookup_for_locale(entries, key, system_locale().as_deref())
 }
 
 fn flag(entries: &[IniEntry], key: &str) -> bool {
@@ -255,7 +321,7 @@ mod tests {
 [Desktop Entry]
 Type=Application
 Name=Editor
-Name[de]=Editor-de
+Name[zz]=Editor-zz
 GenericName=Text Editor
 Exec=editor --wait %F
 Icon=editor
@@ -276,8 +342,8 @@ Exec=editor --new
         assert_eq!(sections.len(), 2);
         assert_eq!(sections[0].name, "Desktop Entry");
         assert!(sections[0].entries.iter().any(|e| e.key == "Name"
-            && e.locale.as_deref() == Some("de")
-            && e.value == "Editor-de"));
+            && e.locale.as_deref() == Some("zz")
+            && e.value == "Editor-zz"));
     }
 
     #[test]
@@ -303,6 +369,37 @@ Exec=editor --new
         assert!(app.no_display);
         assert!(!app.terminal);
         assert!(app.is_valid());
+    }
+
+    #[test]
+    fn localized_name_falls_back_to_plain_key() {
+        // A file that lists a foreign locale first must not leak it into the UI.
+        let text = "[Desktop Entry]\nType=Application\nName[ar]=\u{0644}\u{0648}\u{062a}\u{0631}\u{0633}\nName[de]=Lutris-de\nName=Lutris\nExec=sh -c true\n";
+        let entries = parse_ini(text);
+        let entries = &entries[0].entries;
+        assert_eq!(
+            lookup_for_locale(entries, "Name", Some("en_US")),
+            Some("Lutris")
+        );
+        assert_eq!(
+            lookup_for_locale(entries, "Name", Some("de_DE")),
+            Some("Lutris-de")
+        );
+        assert_eq!(lookup_for_locale(entries, "Name", None), Some("Lutris"));
+        assert_eq!(
+            lookup_for_locale(entries, "Name", Some("ar")),
+            Some("\u{0644}\u{0648}\u{062a}\u{0631}\u{0633}")
+        );
+    }
+
+    #[test]
+    fn locale_candidates_go_from_specific_to_language() {
+        assert_eq!(locale_candidates("pt_BR"), vec!["pt_BR", "pt"]);
+        assert_eq!(
+            locale_candidates("sr_RS@latin"),
+            vec!["sr_RS@latin", "sr_RS", "sr@latin", "sr"]
+        );
+        assert_eq!(locale_candidates("fr"), vec!["fr"]);
     }
 
     #[test]
