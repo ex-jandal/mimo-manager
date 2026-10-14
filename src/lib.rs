@@ -4,6 +4,7 @@
 //! database, desktop entries, associations) and a GTK4/Relm4 user interface.
 //! The core never touches GTK and is exercised directly by the test suite.
 
+pub mod assoc;
 pub mod desktop;
 pub mod domain;
 pub mod error;
