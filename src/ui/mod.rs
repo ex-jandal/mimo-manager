@@ -16,19 +16,8 @@ use crate::desktop::discovery::{DiscoveryReport, discover};
 use crate::interaction::{Action, Interaction, Key as UiKey, Mode, Workspace};
 use crate::mime::MimeDatabase;
 use crate::session::Session;
+use crate::theme::{self, Modeline, ModelineFields};
 use crate::xdg::Paths;
-
-const CSS: &str = r#"
-window { background-color: #292522; color: #ECE1D7; }
-.mono, .mono label { font-family: "CaskaydiaCove Nerd Font Mono", monospace; font-size: 11pt; }
-.pane { background-color: #292522; }
-.pane row:selected { background-color: #403A36; color: #ECE1D7; }
-.commandline { background-color: #34302C; color: #C1A78E; padding: 2px 8px; }
-.modeline { background-color: #34302C; padding: 3px 10px; }
-.modeline label { font-size: 10pt; }
-.mode { color: #85B695; }
-.detail-title { color: #E49B5D; padding: 4px 10px; }
-"#;
 
 struct AppModel {
     paths: Paths,
@@ -42,19 +31,14 @@ struct AppModel {
     detail_items: Vec<String>,
     detail_ids: Vec<String>,
     load_error: Option<String>,
+    modeline_fields: ModelineFields,
 
     window: gtk::ApplicationWindow,
     list_box: gtk::ListBox,
     detail_box: gtk::ListBox,
     input_label: gtk::Label,
     detail_title: gtk::Label,
-    mode_label: gtk::Label,
-    workspace_label: gtk::Label,
-    selection_label: gtk::Label,
-    count_label: gtk::Label,
-    default_label: gtk::Label,
-    scope_label: gtk::Label,
-    status_label: gtk::Label,
+    modeline_label: gtk::Label,
 }
 
 #[derive(Debug)]
@@ -119,23 +103,14 @@ impl SimpleComponent for AppModel {
 
                 gtk::Box {
                     set_orientation: gtk::Orientation::Horizontal,
-                    set_spacing: 14,
                     add_css_class: "modeline",
 
-                    #[name(mode_label)]
-                    gtk::Label { set_xalign: 0.0, add_css_class: "mode" },
-                    #[name(workspace_label)]
-                    gtk::Label { set_xalign: 0.0 },
-                    #[name(selection_label)]
-                    gtk::Label { set_xalign: 0.0 },
-                    #[name(count_label)]
-                    gtk::Label { set_xalign: 0.0 },
-                    #[name(default_label)]
-                    gtk::Label { set_xalign: 0.0, set_hexpand: true },
-                    #[name(scope_label)]
-                    gtk::Label { set_xalign: 0.0 },
-                    #[name(status_label)]
-                    gtk::Label { set_xalign: 0.0 },
+                    #[name(modeline_label)]
+                    gtk::Label {
+                        set_xalign: 0.0,
+                        set_hexpand: true,
+                        set_use_markup: true,
+                    },
                 },
             },
         }
@@ -164,18 +139,13 @@ impl SimpleComponent for AppModel {
             detail_items: Vec::new(),
             detail_ids: Vec::new(),
             load_error,
+            modeline_fields: ModelineFields::default(),
             window: widgets.main_window.clone(),
             list_box: widgets.list_box.clone(),
             detail_box: widgets.detail_box.clone(),
             input_label: widgets.input_label.clone(),
             detail_title: widgets.detail_title.clone(),
-            mode_label: widgets.mode_label.clone(),
-            workspace_label: widgets.workspace_label.clone(),
-            selection_label: widgets.selection_label.clone(),
-            count_label: widgets.count_label.clone(),
-            default_label: widgets.default_label.clone(),
-            scope_label: widgets.scope_label.clone(),
-            status_label: widgets.status_label.clone(),
+            modeline_label: widgets.modeline_label.clone(),
         };
 
         install_key_controller(&root, sender.clone());
@@ -443,10 +413,6 @@ impl AppModel {
 
     fn update_modeline(&mut self) {
         let it = &self.interaction;
-        self.mode_label.set_label(it.mode().label());
-        self.workspace_label.set_label(it.workspace().label());
-        self.selection_label.set_label(&it.selection_label());
-        self.count_label.set_label(&it.count_label());
 
         let default = self
             .selected_mime()
@@ -456,20 +422,30 @@ impl AppModel {
                     .and_then(|mime| crate::queries::default_app(&mime).map(|a| a.name))
             })
             .unwrap_or_else(|| "-".to_string());
-        self.default_label.set_label(&format!("DEFAULT {default}"));
 
         let scope = match self.selected_mime() {
             Some(mime) if self.user_override(&mime) => "user",
             Some(_) => "system",
             None => "-",
         };
-        self.scope_label.set_label(&format!("SCOPE {scope}"));
 
         let status = it
             .prompt()
             .or_else(|| it.status().map(str::to_string))
             .unwrap_or_default();
-        self.status_label.set_label(&status);
+
+        let modeline = Modeline {
+            mode: it.mode().label().to_string(),
+            workspace: it.workspace().label().to_string(),
+            selection: it.selection_label(),
+            count: it.count_label(),
+            default: format!("DEFAULT {default}"),
+            scope: format!("SCOPE {scope}"),
+            status,
+            theme: theme::THEME_NAME.to_string(),
+        };
+        self.modeline_label
+            .set_markup(&theme::render_markup(&self.modeline_fields, &modeline));
     }
 
     fn user_override(&self, mime: &str) -> bool {
@@ -595,7 +571,7 @@ fn install_css() {
         return;
     };
     let provider = gtk::CssProvider::new();
-    provider.load_from_data(CSS);
+    provider.load_from_data(&theme::MELANGE_DARK.stylesheet());
     gtk::style_context_add_provider_for_display(
         &display,
         &provider,
