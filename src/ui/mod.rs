@@ -1,14 +1,66 @@
 //! GTK4 + Relm4 user interface.
+//!
+//! The view is deliberately thin: it translates key events into
+//! [`crate::interaction::Key`] values, feeds them to the state machine, and
+//! carries out the resulting [`crate::interaction::Action`]s.
 
+use std::process::Command as ProcCommand;
+
+use relm4::RelmRemoveAllExt;
 use relm4::gtk::prelude::*;
+use relm4::gtk::{self, gdk, glib};
 use relm4::prelude::*;
 
+use crate::assoc::{AssocEdit, Associations, MimeappsFile};
+use crate::desktop::discovery::{DiscoveryReport, discover};
+use crate::interaction::{Action, Interaction, Key as UiKey, Mode, Workspace};
+use crate::mime::MimeDatabase;
+use crate::session::Session;
+use crate::xdg::Paths;
+
+const CSS: &str = r#"
+window { background-color: #292522; color: #ECE1D7; }
+.mono, .mono label { font-family: "CaskaydiaCove Nerd Font Mono", monospace; font-size: 11pt; }
+.pane { background-color: #292522; }
+.pane row:selected { background-color: #403A36; color: #ECE1D7; }
+.commandline { background-color: #34302C; color: #C1A78E; padding: 2px 8px; }
+.modeline { background-color: #34302C; padding: 3px 10px; }
+.modeline label { font-size: 10pt; }
+.mode { color: #85B695; }
+.detail-title { color: #E49B5D; padding: 4px 10px; }
+"#;
+
 struct AppModel {
-    items: usize,
+    paths: Paths,
+    db: MimeDatabase,
+    apps: DiscoveryReport,
+    assoc: Associations,
+    session: Session,
+    interaction: Interaction,
+    list_items: Vec<String>,
+    list_app_indices: Vec<usize>,
+    detail_items: Vec<String>,
+    detail_ids: Vec<String>,
+    load_error: Option<String>,
+
+    window: gtk::ApplicationWindow,
+    list_box: gtk::ListBox,
+    detail_box: gtk::ListBox,
+    input_label: gtk::Label,
+    detail_title: gtk::Label,
+    mode_label: gtk::Label,
+    workspace_label: gtk::Label,
+    selection_label: gtk::Label,
+    count_label: gtk::Label,
+    default_label: gtk::Label,
+    scope_label: gtk::Label,
+    status_label: gtk::Label,
 }
 
 #[derive(Debug)]
-enum AppMsg {}
+enum AppMsg {
+    Key(UiKey),
+}
 
 #[relm4::component]
 impl SimpleComponent for AppModel {
@@ -17,30 +69,73 @@ impl SimpleComponent for AppModel {
     type Output = ();
 
     view! {
-        gtk::ApplicationWindow {
+        main_window = gtk::ApplicationWindow {
             set_title: Some("mimo_manager"),
-            set_default_size: (900, 600),
+            set_default_size: (1000, 640),
             set_decorated: false,
+            add_css_class: "mono",
 
             gtk::Box {
                 set_orientation: gtk::Orientation::Vertical,
 
-                gtk::Label {
+                gtk::Box {
+                    set_orientation: gtk::Orientation::Horizontal,
                     set_hexpand: true,
                     set_vexpand: true,
-                    set_label: "No items",
+
+                    gtk::ScrolledWindow {
+                        set_hexpand: true,
+                        set_vexpand: true,
+                        #[name(list_box)]
+                        gtk::ListBox {
+                            set_selection_mode: gtk::SelectionMode::Single,
+                            add_css_class: "pane",
+                        },
+                    },
+
+                    gtk::Box {
+                        set_orientation: gtk::Orientation::Vertical,
+                        set_width_request: 420,
+
+                        #[name(detail_title)]
+                        gtk::Label {
+                            set_xalign: 0.0,
+                            add_css_class: "detail-title",
+                        },
+
+                        gtk::ScrolledWindow {
+                            set_vexpand: true,
+                            #[name(detail_box)]
+                            gtk::ListBox {
+                                set_selection_mode: gtk::SelectionMode::Single,
+                                add_css_class: "pane",
+                            },
+                        },
+                    },
                 },
 
+                #[name(input_label)]
+                gtk::Label { set_xalign: 0.0, add_css_class: "commandline" },
+
                 gtk::Box {
+                    set_orientation: gtk::Orientation::Horizontal,
+                    set_spacing: 14,
                     add_css_class: "modeline",
-                    gtk::Label { set_label: "NORMAL" },
-                    gtk::Label { set_label: "MIME TYPES" },
-                    #[watch]
-                    set_tooltip_text: Some(&format!("{} items", model.items)),
-                    gtk::Label {
-                        #[watch]
-                        set_label: &format!("{} ITEMS", model.items),
-                    },
+
+                    #[name(mode_label)]
+                    gtk::Label { set_xalign: 0.0, add_css_class: "mode" },
+                    #[name(workspace_label)]
+                    gtk::Label { set_xalign: 0.0 },
+                    #[name(selection_label)]
+                    gtk::Label { set_xalign: 0.0 },
+                    #[name(count_label)]
+                    gtk::Label { set_xalign: 0.0 },
+                    #[name(default_label)]
+                    gtk::Label { set_xalign: 0.0, set_hexpand: true },
+                    #[name(scope_label)]
+                    gtk::Label { set_xalign: 0.0 },
+                    #[name(status_label)]
+                    gtk::Label { set_xalign: 0.0 },
                 },
             },
         }
@@ -49,20 +144,512 @@ impl SimpleComponent for AppModel {
     fn init(
         _init: Self::Init,
         root: Self::Root,
-        _sender: ComponentSender<Self>,
+        sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        let model = AppModel { items: 0 };
+        install_css();
+
         let widgets = view_output!();
+
+        let (paths, db, apps, assoc, session, load_error) = load_world();
+
+        let mut model = AppModel {
+            paths,
+            db,
+            apps,
+            assoc,
+            session,
+            interaction: Interaction::new(),
+            list_items: Vec::new(),
+            list_app_indices: Vec::new(),
+            detail_items: Vec::new(),
+            detail_ids: Vec::new(),
+            load_error,
+            window: widgets.main_window.clone(),
+            list_box: widgets.list_box.clone(),
+            detail_box: widgets.detail_box.clone(),
+            input_label: widgets.input_label.clone(),
+            detail_title: widgets.detail_title.clone(),
+            mode_label: widgets.mode_label.clone(),
+            workspace_label: widgets.workspace_label.clone(),
+            selection_label: widgets.selection_label.clone(),
+            count_label: widgets.count_label.clone(),
+            default_label: widgets.default_label.clone(),
+            scope_label: widgets.scope_label.clone(),
+            status_label: widgets.status_label.clone(),
+        };
+
+        install_key_controller(&root, sender.clone());
+        model.refresh();
+        if let Some(error) = model.load_error.take() {
+            model.interaction.set_status(Some(error));
+            model.update_modeline();
+        }
+
         ComponentParts { model, widgets }
     }
 
     fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
-        match msg {}
+        match msg {
+            AppMsg::Key(key) => {
+                let actions = self.interaction.handle_key(key);
+                self.apply_actions(actions);
+                self.refresh();
+            }
+        }
     }
+}
+
+impl AppModel {
+    fn apply_actions(&mut self, actions: Vec<Action>) {
+        for action in actions {
+            match action {
+                Action::SetDefault(app) => {
+                    if let Some(mime) = self.selected_mime() {
+                        self.edit(AssocEdit::SetDefault { mime, app });
+                    }
+                }
+                Action::Add(app) => {
+                    if let Some(mime) = self.selected_mime() {
+                        self.edit(AssocEdit::Add { mime, app });
+                    }
+                }
+                Action::Remove(app) => {
+                    if let Some(mime) = self.selected_mime() {
+                        self.edit(AssocEdit::Remove { mime, app });
+                    }
+                }
+                Action::RemoveSelected => {
+                    if let (Some(mime), Some(app)) =
+                        (self.selected_mime(), self.selected_detail_app())
+                    {
+                        self.edit(AssocEdit::Remove { mime, app });
+                    }
+                }
+                Action::Reset => {
+                    if let Some(mime) = self.selected_mime() {
+                        self.edit(AssocEdit::Reset { mime });
+                    }
+                }
+                Action::Undo => match self.session.undo() {
+                    Ok(true) => self.after_write("undo"),
+                    Ok(false) => self.interaction.set_status(Some("nothing to undo".into())),
+                    Err(error) => self.fail(error),
+                },
+                Action::Redo => match self.session.redo() {
+                    Ok(true) => self.after_write("redo"),
+                    Ok(false) => self.interaction.set_status(Some("nothing to redo".into())),
+                    Err(error) => self.fail(error),
+                },
+                Action::OpenDetail => {}
+                Action::Activate => {
+                    if self.interaction.workspace() == Workspace::MimeTypes
+                        && let (Some(mime), Some(app)) =
+                            (self.selected_mime(), self.selected_detail_app())
+                    {
+                        self.edit(AssocEdit::SetDefault { mime, app });
+                    }
+                }
+                Action::OpenConfig => self.open_config(),
+                Action::SetTheme(_) => {
+                    self.interaction
+                        .set_status(Some("themes arrive in a later milestone".into()));
+                }
+                Action::Quit => self.window.close(),
+            }
+        }
+    }
+
+    fn edit(&mut self, edit: AssocEdit) {
+        match self.session.apply(&edit) {
+            Ok(()) => self.after_write(describe(&edit)),
+            Err(error) => self.fail(error),
+        }
+    }
+
+    fn after_write(&mut self, what: &str) {
+        match Associations::load(&self.paths) {
+            Ok(assoc) => self.assoc = assoc,
+            Err(error) => return self.fail(error),
+        }
+        self.interaction.set_status(Some(what.to_string()));
+    }
+
+    fn fail(&mut self, error: crate::Error) {
+        self.interaction.set_status(Some(format!("error: {error}")));
+    }
+
+    fn open_config(&mut self) {
+        let path = self.paths.config_file();
+        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+        match ProcCommand::new(editor).arg(&path).spawn() {
+            Ok(_) => self
+                .interaction
+                .set_status(Some(format!("opened {}", path.display()))),
+            Err(error) => self
+                .interaction
+                .set_status(Some(format!("cannot open editor: {error}"))),
+        }
+    }
+
+    /// The MIME type selected in the list (only in the MIME workspace).
+    fn selected_mime(&self) -> Option<String> {
+        if self.interaction.workspace() != Workspace::MimeTypes {
+            return None;
+        }
+        self.list_items
+            .get(self.interaction.list_selection())
+            .cloned()
+    }
+
+    /// The desktop-entry id selected in the detail pane.
+    fn selected_detail_app(&self) -> Option<String> {
+        self.detail_ids
+            .get(self.interaction.detail_selection())
+            .cloned()
+    }
+
+    fn refresh(&mut self) {
+        self.rebuild_list();
+        self.rebuild_detail();
+
+        let list_count = self.list_items.len();
+        let detail_count = self.detail_items.len();
+        self.interaction.set_counts(list_count, detail_count);
+
+        // The count may have clamped the selection; rebuild rows to match.
+        self.rebuild_list();
+        self.rebuild_detail();
+        self.update_modeline();
+        self.update_input_line();
+    }
+
+    fn rebuild_list(&mut self) {
+        let filter = self.interaction.filter().to_lowercase();
+        self.list_items.clear();
+        self.list_app_indices.clear();
+
+        match self.interaction.workspace() {
+            Workspace::MimeTypes => {
+                for mime in self.db.all() {
+                    if filter.is_empty() || mime.name.to_lowercase().contains(&filter) {
+                        self.list_items.push(mime.name.clone());
+                    }
+                }
+            }
+            Workspace::Applications => {
+                for (index, app) in self.apps.apps.iter().enumerate() {
+                    if filter.is_empty() || app.name.to_lowercase().contains(&filter) {
+                        self.list_items.push(app.name.clone());
+                        self.list_app_indices.push(index);
+                    }
+                }
+            }
+            Workspace::Desktop | Workspace::Config => {}
+        }
+        // ponytail: rebuilds all rows per keypress; virtualize with ListView if it lags.
+        fill_rows(
+            &self.list_box,
+            &self.list_items,
+            self.interaction.list_selection(),
+        );
+    }
+
+    fn rebuild_detail(&mut self) {
+        self.detail_items.clear();
+        self.detail_ids.clear();
+
+        match self.interaction.workspace() {
+            Workspace::MimeTypes => {
+                if let Some(mime) = self
+                    .list_items
+                    .get(self.interaction.list_selection())
+                    .cloned()
+                {
+                    let default = self.assoc.default_app(&mime).map(str::to_string);
+                    for app in &self.apps.apps {
+                        if app.mime_types.iter().any(|m| m.eq_ignore_ascii_case(&mime)) {
+                            let marker = if default.as_deref() == Some(app.id.as_str()) {
+                                "● "
+                            } else {
+                                "  "
+                            };
+                            self.detail_items
+                                .push(format!("{marker}{}  [{}]", app.name, app.id));
+                            self.detail_ids.push(app.id.clone());
+                        }
+                    }
+                    if self.detail_items.is_empty() {
+                        self.detail_items.push("(no applications)".into());
+                    }
+                    self.detail_title
+                        .set_label(&format!("{mime}  ·  {} apps", self.detail_ids.len()));
+                } else {
+                    self.detail_title.set_label("(no MIME type selected)");
+                }
+            }
+            Workspace::Applications => {
+                if let Some(app) = self
+                    .list_app_indices
+                    .get(self.interaction.list_selection())
+                    .and_then(|index| self.apps.apps.get(*index))
+                {
+                    self.detail_title.set_label(&app.name);
+                    self.detail_items.push(format!("id:   {}", app.id));
+                    self.detail_items
+                        .push(format!("exec: {}", app.exec.as_deref().unwrap_or("-")));
+                    self.detail_items.push(format!(
+                        "type: {}",
+                        match &app.validity {
+                            crate::domain::Validity::Valid => "Application".to_string(),
+                            crate::domain::Validity::Invalid(reason) =>
+                                format!("invalid ({reason})"),
+                        }
+                    ));
+                    self.detail_items.push(format!(
+                        "tags: {}",
+                        if app.tags().is_empty() {
+                            "-".to_string()
+                        } else {
+                            app.tags().join(", ")
+                        }
+                    ));
+                    self.detail_items
+                        .push(format!("mime: {}", app.mime_types.join(", ")));
+                    self.detail_items
+                        .push(format!("path: {}", app.path.display()));
+                } else {
+                    self.detail_title.set_label("");
+                }
+            }
+            Workspace::Desktop => {
+                self.detail_title.set_label("Desktop entries");
+                self.detail_items
+                    .push("Browse and edit desktop entries (later milestone)".into());
+            }
+            Workspace::Config => {
+                self.detail_title.set_label("Configuration");
+                self.detail_items.push(format!(
+                    "config file: {}",
+                    self.paths.config_file().display()
+                ));
+            }
+        }
+        fill_rows(
+            &self.detail_box,
+            &self.detail_items,
+            self.interaction.detail_selection(),
+        );
+    }
+
+    fn update_modeline(&mut self) {
+        let it = &self.interaction;
+        self.mode_label.set_label(it.mode().label());
+        self.workspace_label.set_label(it.workspace().label());
+        self.selection_label.set_label(&it.selection_label());
+        self.count_label.set_label(&it.count_label());
+
+        let default = self
+            .selected_mime()
+            .and_then(|mime| self.assoc.default_app(&mime).map(str::to_string))
+            .or_else(|| {
+                self.selected_mime()
+                    .and_then(|mime| crate::queries::default_app(&mime).map(|a| a.name))
+            })
+            .unwrap_or_else(|| "-".to_string());
+        self.default_label.set_label(&format!("DEFAULT {default}"));
+
+        let scope = match self.selected_mime() {
+            Some(mime) if self.user_override(&mime) => "user",
+            Some(_) => "system",
+            None => "-",
+        };
+        self.scope_label.set_label(&format!("SCOPE {scope}"));
+
+        let status = it
+            .prompt()
+            .or_else(|| it.status().map(str::to_string))
+            .unwrap_or_default();
+        self.status_label.set_label(&status);
+    }
+
+    fn user_override(&self, mime: &str) -> bool {
+        MimeappsFile::load(self.session.target())
+            .map(|file| file.sets(mime))
+            .unwrap_or(false)
+    }
+
+    fn update_input_line(&mut self) {
+        let it = &self.interaction;
+        let (text, visible) = match it.mode() {
+            Mode::Command => (format!(":{}", it.input()), true),
+            Mode::Search => (format!("/{}", it.input()), true),
+            Mode::Confirm => (it.prompt().unwrap_or_default(), true),
+            Mode::Normal => (String::new(), false),
+        };
+        self.input_label.set_label(&text);
+        self.input_label.set_visible(visible);
+    }
+}
+
+fn describe(edit: &AssocEdit) -> &'static str {
+    match edit {
+        AssocEdit::SetDefault { .. } => "set default",
+        AssocEdit::Add { .. } => "added association",
+        AssocEdit::Remove { .. } => "removed association",
+        AssocEdit::Reset { .. } => "reset overrides",
+    }
+}
+
+fn load_world() -> (
+    Paths,
+    MimeDatabase,
+    DiscoveryReport,
+    Associations,
+    Session,
+    Option<String>,
+) {
+    let paths = match Paths::from_env() {
+        Ok(paths) => paths,
+        Err(error) => {
+            let paths = Paths::rooted("/");
+            let session = Session::new(paths.clone());
+            return (
+                paths,
+                MimeDatabase::default(),
+                DiscoveryReport::default(),
+                Associations::default(),
+                session,
+                Some(error.to_string()),
+            );
+        }
+    };
+
+    let mut error = None;
+    let db = match MimeDatabase::load(&paths) {
+        Ok(db) => db,
+        Err(e) => {
+            error = Some(e.to_string());
+            MimeDatabase::default()
+        }
+    };
+    let apps = discover(&paths, &std::env::var("PATH").unwrap_or_default());
+    let assoc = Associations::load(&paths).unwrap_or_default();
+    let session = Session::new(paths.clone());
+
+    (paths, db, apps, assoc, session, error)
+}
+
+fn fill_rows(list_box: &gtk::ListBox, items: &[String], selection: usize) {
+    list_box.remove_all();
+    for (index, item) in items.iter().enumerate() {
+        let row = gtk::ListBoxRow::new();
+        row.set_activatable(false);
+        let label = gtk::Label::new(Some(item));
+        label.set_xalign(0.0);
+        label.set_margin_top(2);
+        label.set_margin_bottom(2);
+        label.set_margin_start(8);
+        label.set_margin_end(8);
+        row.set_child(Some(&label));
+        list_box.append(&row);
+        if index == selection {
+            list_box.select_row(Some(&row));
+        }
+    }
+}
+
+fn install_key_controller(root: &gtk::ApplicationWindow, sender: ComponentSender<AppModel>) {
+    let controller = gtk::EventControllerKey::new();
+    controller.connect_key_pressed(move |_, key, _code, state| {
+        if let Some(key) = translate_key(key, state) {
+            sender.input(AppMsg::Key(key));
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+    root.add_controller(controller);
+}
+
+fn translate_key(key: gdk::Key, state: gdk::ModifierType) -> Option<UiKey> {
+    let ctrl = state.contains(gdk::ModifierType::CONTROL_MASK);
+    match key.name().as_deref() {
+        Some("Return") | Some("KP_Enter") => return Some(UiKey::Enter),
+        Some("Escape") => return Some(UiKey::Esc),
+        Some("BackSpace") => return Some(UiKey::Backspace),
+        Some("Tab") | Some("ISO_Left_Tab") => return Some(UiKey::Tab),
+        Some("Up") => return Some(UiKey::Up),
+        Some("Down") => return Some(UiKey::Down),
+        _ => {}
+    }
+    let ch = key.to_unicode()?;
+    if ctrl {
+        Some(UiKey::Ctrl(ch.to_ascii_lowercase()))
+    } else {
+        Some(UiKey::Char(ch))
+    }
+}
+
+fn install_css() {
+    let Some(display) = gdk::Display::default() else {
+        return;
+    };
+    let provider = gtk::CssProvider::new();
+    provider.load_from_data(CSS);
+    gtk::style_context_add_provider_for_display(
+        &display,
+        &provider,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
 }
 
 /// Run the application.
 pub fn run() {
     let app = RelmApp::new("dev.mimo_manager.MimoManager");
     app.run::<AppModel>(());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn translate_control_letters() {
+        assert_eq!(
+            translate_key(
+                gdk::Key::from_name("d").unwrap(),
+                gdk::ModifierType::CONTROL_MASK
+            ),
+            Some(UiKey::Ctrl('d'))
+        );
+    }
+
+    #[test]
+    fn translate_special_keys() {
+        assert_eq!(
+            translate_key(
+                gdk::Key::from_name("Return").unwrap(),
+                gdk::ModifierType::empty()
+            ),
+            Some(UiKey::Enter)
+        );
+        assert_eq!(
+            translate_key(
+                gdk::Key::from_name("Escape").unwrap(),
+                gdk::ModifierType::empty()
+            ),
+            Some(UiKey::Esc)
+        );
+    }
+
+    #[test]
+    fn translate_plain_char() {
+        assert_eq!(
+            translate_key(
+                gdk::Key::from_name("j").unwrap(),
+                gdk::ModifierType::empty()
+            ),
+            Some(UiKey::Char('j'))
+        );
+    }
 }
