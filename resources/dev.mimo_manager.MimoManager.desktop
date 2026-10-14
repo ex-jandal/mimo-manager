@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Mimo Manager
+GenericName=Default Application Manager
+Comment=Keyboard-centric MIME type and default-application manager
+Exec=mimo_manager
+Icon=dev.mimo_manager.MimoManager
+Terminal=false
+Categories=Settings;Utility;
+Keywords=MIME;default application;file association;xdg;mimeapps;
+StartupNotify=true
