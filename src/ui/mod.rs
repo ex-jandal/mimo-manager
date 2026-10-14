@@ -79,6 +79,7 @@ impl SimpleComponent for AppModel {
                     gtk::ScrolledWindow {
                         set_hexpand: true,
                         set_vexpand: true,
+                        set_policy: (gtk::PolicyType::Never, gtk::PolicyType::Automatic),
                         #[name(list_box)]
                         gtk::ListBox {
                             set_selection_mode: gtk::SelectionMode::Single,
@@ -93,12 +94,15 @@ impl SimpleComponent for AppModel {
                         #[name(detail_title)]
                         gtk::Label {
                             set_xalign: 0.0,
+                            set_ellipsize: gtk::pango::EllipsizeMode::End,
+                            set_max_width_chars: 1,
                             add_css_class: "detail-title",
                         },
 
                         #[name(detail_scroll)]
                         gtk::ScrolledWindow {
                             set_vexpand: true,
+                            set_policy: (gtk::PolicyType::Never, gtk::PolicyType::Automatic),
                             #[name(detail_box)]
                             gtk::ListBox {
                                 set_selection_mode: gtk::SelectionMode::Single,
@@ -585,6 +589,7 @@ fn fill_rows(list_box: &gtk::ListBox, items: &[String]) {
         row.set_activatable(false);
         let label = gtk::Label::new(Some(item));
         label.set_xalign(0.0);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         label.set_margin_top(5);
         label.set_margin_bottom(5);
         label.set_margin_start(12);
