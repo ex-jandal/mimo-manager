@@ -30,17 +30,22 @@ struct AppModel {
     interaction: Interaction,
     list_items: Vec<String>,
     list_app_indices: Vec<usize>,
+    rendered_list: Vec<String>,
     detail_items: Vec<String>,
     detail_ids: Vec<String>,
+    rendered_detail: Vec<String>,
     load_error: Option<String>,
     modeline_fields: ModelineFields,
 
     window: gtk::ApplicationWindow,
     list_box: gtk::ListBox,
+    list_scroll: gtk::ScrolledWindow,
     detail_box: gtk::ListBox,
+    detail_scroll: gtk::ScrolledWindow,
     input_label: gtk::Label,
     detail_title: gtk::Label,
-    modeline_label: gtk::Label,
+    modeline_left: gtk::Label,
+    modeline_right: gtk::Label,
 }
 
 #[derive(Debug)]
@@ -66,9 +71,11 @@ impl SimpleComponent for AppModel {
 
                 gtk::Box {
                     set_orientation: gtk::Orientation::Horizontal,
+                    set_homogeneous: true,
                     set_hexpand: true,
                     set_vexpand: true,
 
+                    #[name(list_scroll)]
                     gtk::ScrolledWindow {
                         set_hexpand: true,
                         set_vexpand: true,
@@ -81,7 +88,7 @@ impl SimpleComponent for AppModel {
 
                     gtk::Box {
                         set_orientation: gtk::Orientation::Vertical,
-                        set_width_request: 420,
+                        set_hexpand: true,
 
                         #[name(detail_title)]
                         gtk::Label {
@@ -89,6 +96,7 @@ impl SimpleComponent for AppModel {
                             add_css_class: "detail-title",
                         },
 
+                        #[name(detail_scroll)]
                         gtk::ScrolledWindow {
                             set_vexpand: true,
                             #[name(detail_box)]
@@ -107,10 +115,16 @@ impl SimpleComponent for AppModel {
                     set_orientation: gtk::Orientation::Horizontal,
                     add_css_class: "modeline",
 
-                    #[name(modeline_label)]
+                    #[name(modeline_left)]
                     gtk::Label {
                         set_xalign: 0.0,
                         set_hexpand: true,
+                        set_use_markup: true,
+                    },
+
+                    #[name(modeline_right)]
+                    gtk::Label {
+                        set_xalign: 1.0,
                         set_use_markup: true,
                     },
                 },
@@ -142,16 +156,21 @@ impl SimpleComponent for AppModel {
             interaction,
             list_items: Vec::new(),
             list_app_indices: Vec::new(),
+            rendered_list: Vec::new(),
             detail_items: Vec::new(),
             detail_ids: Vec::new(),
+            rendered_detail: Vec::new(),
             load_error,
             modeline_fields: ModelineFields::default(),
             window: widgets.main_window.clone(),
             list_box: widgets.list_box.clone(),
+            list_scroll: widgets.list_scroll.clone(),
             detail_box: widgets.detail_box.clone(),
+            detail_scroll: widgets.detail_scroll.clone(),
             input_label: widgets.input_label.clone(),
             detail_title: widgets.detail_title.clone(),
-            modeline_label: widgets.modeline_label.clone(),
+            modeline_left: widgets.modeline_left.clone(),
+            modeline_right: widgets.modeline_right.clone(),
         };
         model.modeline_fields = model.config.modeline.clone().into();
 
@@ -293,11 +312,29 @@ impl AppModel {
         let detail_count = self.detail_items.len();
         self.interaction.set_counts(list_count, detail_count);
 
-        // The count may have clamped the selection; rebuild rows to match.
+        // set_counts may have clamped the selection; re-select and scroll.
         self.rebuild_list();
         self.rebuild_detail();
+        self.update_page_rows();
         self.update_modeline();
         self.update_input_line();
+    }
+
+    /// Derive how many rows fit on screen so half-page jumps match the window.
+    fn update_page_rows(&mut self) {
+        let viewport = self.list_scroll.height();
+        if viewport <= 0 {
+            return;
+        }
+        let row_height = self
+            .list_box
+            .row_at_index(0)
+            .and_then(|row| row.compute_bounds(&self.list_box))
+            .map(|bounds| bounds.height() as f64)
+            .filter(|height| *height > 0.0)
+            .unwrap_or(24.0);
+        let rows = (viewport as f64 / row_height).floor().max(1.0) as usize;
+        self.interaction.set_page_rows(rows);
     }
 
     fn rebuild_list(&mut self) {
@@ -323,10 +360,15 @@ impl AppModel {
             }
             Workspace::Desktop | Workspace::Config => {}
         }
-        // ponytail: rebuilds all rows per keypress; virtualize with ListView if it lags.
-        fill_rows(
+        // ponytail: rebuilds all rows only when the item set changes; virtualize
+        // with ListView if a huge list still lags.
+        if self.list_items != self.rendered_list {
+            fill_rows(&self.list_box, &self.list_items);
+            self.rendered_list = self.list_items.clone();
+        }
+        select_and_scroll(
             &self.list_box,
-            &self.list_items,
+            &self.list_scroll,
             self.interaction.list_selection(),
         );
     }
@@ -411,9 +453,13 @@ impl AppModel {
                 ));
             }
         }
-        fill_rows(
+        if self.detail_items != self.rendered_detail {
+            fill_rows(&self.detail_box, &self.detail_items);
+            self.rendered_detail = self.detail_items.clone();
+        }
+        select_and_scroll(
             &self.detail_box,
-            &self.detail_items,
+            &self.detail_scroll,
             self.interaction.detail_selection(),
         );
     }
@@ -451,8 +497,9 @@ impl AppModel {
             status,
             theme: self.config.theme.clone(),
         };
-        self.modeline_label
-            .set_markup(&theme::render_markup(&self.modeline_fields, &modeline));
+        let (left, right) = theme::render(&self.modeline_fields, &modeline);
+        self.modeline_left.set_markup(&left);
+        self.modeline_right.set_markup(&right);
     }
 
     fn user_override(&self, mime: &str) -> bool {
@@ -531,22 +578,32 @@ fn load_world() -> (
     (paths, config, db, apps, assoc, session, error)
 }
 
-fn fill_rows(list_box: &gtk::ListBox, items: &[String], selection: usize) {
+fn fill_rows(list_box: &gtk::ListBox, items: &[String]) {
     list_box.remove_all();
-    for (index, item) in items.iter().enumerate() {
+    for item in items {
         let row = gtk::ListBoxRow::new();
         row.set_activatable(false);
         let label = gtk::Label::new(Some(item));
         label.set_xalign(0.0);
-        label.set_margin_top(2);
-        label.set_margin_bottom(2);
-        label.set_margin_start(8);
-        label.set_margin_end(8);
+        label.set_margin_top(5);
+        label.set_margin_bottom(5);
+        label.set_margin_start(12);
+        label.set_margin_end(12);
         row.set_child(Some(&label));
         list_box.append(&row);
-        if index == selection {
-            list_box.select_row(Some(&row));
-        }
+    }
+}
+
+/// Select a row and scroll it into view (vim-style cursor follows the window).
+fn select_and_scroll(list_box: &gtk::ListBox, scroll: &gtk::ScrolledWindow, index: usize) {
+    let Some(row) = list_box.row_at_index(index as i32) else {
+        return;
+    };
+    list_box.select_row(Some(&row));
+    if let Some(bounds) = row.compute_bounds(list_box) {
+        let adjustment = scroll.vadjustment();
+        let top = bounds.y() as f64;
+        adjustment.clamp_page(top, top + bounds.height() as f64);
     }
 }
 

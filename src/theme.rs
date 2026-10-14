@@ -51,24 +51,31 @@ pub const MELANGE_DARK: Palette = Palette {
 
 pub const THEME_NAME: &str = "MELANGE DARK";
 
+/// UI scale for text and rows, relative to the system default font size.
+///
+/// Expressed in `em` so it compounds with the user's system scaling rather
+/// than overriding it.
+pub const FONT_SCALE: &str = "1.35em";
+
 impl Palette {
     /// The GTK stylesheet for this palette.
     pub fn stylesheet(&self) -> String {
         format!(
             "window {{ background-color: {bg}; color: {fg}; }}\n\
-             .mono, .mono label {{ font-family: \"CaskaydiaCove Nerd Font Mono\", monospace; font-size: 11pt; }}\n\
+             .mono {{ font-family: \"CaskaydiaCove Nerd Font Mono\", monospace; font-size: {font_scale}; }}\n\
+             .mono label {{ font-family: \"CaskaydiaCove Nerd Font Mono\", monospace; }}\n\
              .pane {{ background-color: {bg}; }}\n\
              .pane row:selected {{ background-color: {selection}; color: {fg}; }}\n\
-             .commandline {{ background-color: {bg_alt}; color: {fg_alt}; padding: 2px 10px; }}\n\
-             .modeline {{ background-color: {bg_alt}; padding: 3px 10px; }}\n\
-             .modeline label {{ font-size: 10pt; }}\n\
-             .detail-title {{ background-color: {bg_alt}; color: {yellow}; padding: 5px 10px; }}\n",
+             .commandline {{ background-color: {bg_alt}; color: {fg_alt}; padding: 4px 12px; }}\n\
+             .modeline {{ background-color: {bg_alt}; padding: 5px 12px; }}\n\
+             .detail-title {{ background-color: {bg_alt}; color: {yellow}; padding: 7px 12px; }}\n",
             bg = self.bg,
             bg_alt = self.bg_alt,
             selection = self.selection,
             fg = self.fg,
             fg_alt = self.fg_alt,
             yellow = self.yellow,
+            font_scale = FONT_SCALE,
         )
     }
 }
@@ -114,27 +121,42 @@ pub struct Modeline {
     pub theme: String,
 }
 
-/// Render the modeline as Pango markup, honouring the enabled fields.
-pub fn render_markup(fields: &ModelineFields, modeline: &Modeline) -> String {
+/// Render the modeline as two Pango markup strings: the left group (state and
+/// buffer context) and the right group (position and status). The interface
+/// justifies them to opposite edges, Doom-style.
+pub fn render(fields: &ModelineFields, modeline: &Modeline) -> (String, String) {
     let palette = MELANGE_DARK;
-    let mut parts: Vec<String> = Vec::new();
-    let mut push = |enabled: bool, colour: &str, text: &str| {
+
+    fn push(parts: &mut Vec<String>, enabled: bool, colour: &str, text: &str) {
         if enabled && !text.is_empty() {
             parts.push(span(colour, text));
         }
-    };
+    }
 
-    push(fields.mode, palette.green_bright, &modeline.mode);
-    push(fields.workspace, palette.blue, &modeline.workspace);
-    push(fields.selection, palette.fg, &modeline.selection);
-    push(fields.count, palette.fg_dim, &modeline.count);
-    push(fields.default, palette.yellow, &modeline.default);
-    push(fields.scope, palette.cyan, &modeline.scope);
-    push(fields.status, palette.red, &modeline.status);
-    push(fields.theme, palette.magenta, &modeline.theme);
+    let mut left = Vec::new();
+    push(&mut left, fields.mode, palette.green_bright, &modeline.mode);
+    push(
+        &mut left,
+        fields.workspace,
+        palette.blue,
+        &modeline.workspace,
+    );
+    push(&mut left, fields.default, palette.yellow, &modeline.default);
+    push(&mut left, fields.scope, palette.cyan, &modeline.scope);
+
+    let mut right = Vec::new();
+    push(
+        &mut right,
+        fields.selection,
+        palette.fg,
+        &modeline.selection,
+    );
+    push(&mut right, fields.count, palette.fg_dim, &modeline.count);
+    push(&mut right, fields.status, palette.red, &modeline.status);
+    push(&mut right, fields.theme, palette.magenta, &modeline.theme);
 
     let separator = span(palette.fg_dim, " | ");
-    parts.join(&separator)
+    (left.join(&separator), right.join(&separator))
 }
 
 fn span(colour: &str, text: &str) -> String {
@@ -173,11 +195,20 @@ mod tests {
 
     #[test]
     fn renders_enabled_fields_with_colour() {
-        let markup = render_markup(&ModelineFields::default(), &modeline());
-        assert!(markup.contains("NORMAL"));
-        assert!(markup.contains("MIME TYPES"));
-        assert!(markup.contains("#85B695"), "mode uses the bright green");
-        assert!(markup.contains("set default"));
+        let (left, right) = render(&ModelineFields::default(), &modeline());
+        assert!(left.contains("NORMAL"));
+        assert!(left.contains("MIME TYPES"));
+        assert!(left.contains("#85B695"), "mode uses the bright green");
+        assert!(right.contains("set default"));
+    }
+
+    #[test]
+    fn splits_state_left_and_position_right() {
+        let (left, right) = render(&ModelineFields::default(), &modeline());
+        assert!(left.contains("NORMAL") && left.contains("MIME TYPES"));
+        assert!(!right.contains("NORMAL"));
+        assert!(right.contains("3/128") && right.contains("128"));
+        assert!(!left.contains("3/128"));
     }
 
     #[test]
@@ -187,31 +218,32 @@ mod tests {
             scope: false,
             ..ModelineFields::default()
         };
-        let markup = render_markup(&fields, &modeline());
-        assert!(!markup.contains("set default"));
-        assert!(!markup.contains("SCOPE"));
-        assert!(markup.contains("NORMAL"));
+        let (left, right) = render(&fields, &modeline());
+        let all = format!("{left}{right}");
+        assert!(!all.contains("set default"));
+        assert!(!all.contains("SCOPE"));
+        assert!(all.contains("NORMAL"));
     }
 
     #[test]
     fn theme_field_is_off_by_default_but_renderable() {
-        let off = render_markup(&ModelineFields::default(), &modeline());
-        assert!(!off.contains(THEME_NAME));
+        let (_, right) = render(&ModelineFields::default(), &modeline());
+        assert!(!right.contains(THEME_NAME));
 
         let fields = ModelineFields {
             theme: true,
             ..ModelineFields::default()
         };
-        let on = render_markup(&fields, &modeline());
-        assert!(on.contains(THEME_NAME));
+        let (_, right) = render(&fields, &modeline());
+        assert!(right.contains(THEME_NAME));
     }
 
     #[test]
     fn markup_is_escaped() {
         let mut m = modeline();
         m.status = "<bad> & worse".into();
-        let markup = render_markup(&ModelineFields::default(), &m);
-        assert!(markup.contains("&lt;bad&gt; &amp; worse"));
+        let (_, right) = render(&ModelineFields::default(), &m);
+        assert!(right.contains("&lt;bad&gt; &amp; worse"));
     }
 
     #[test]
