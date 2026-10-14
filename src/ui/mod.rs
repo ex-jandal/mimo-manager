@@ -283,6 +283,7 @@ impl AppModel {
                             self.set_default_for(app);
                         }
                     }
+                    Workspace::Config => self.open_config(),
                     _ => {}
                 },
                 Action::OpenConfig => self.open_config(),
@@ -482,7 +483,11 @@ impl AppModel {
                     }
                 }
             }
-            Workspace::Desktop | Workspace::Config => {}
+            Workspace::Config => {
+                if filter.is_empty() || "config.toml".contains(&filter) {
+                    self.list_items.push("config.toml".to_string());
+                }
+            }
         }
         // ponytail: rebuilds all rows only when the item set changes; virtualize
         // with ListView if a huge list still lags.
@@ -639,17 +644,29 @@ impl AppModel {
                     None => self.detail_title.set_label("Help"),
                 }
             }
-            Workspace::Desktop => {
-                self.detail_title.set_label("Desktop entries");
-                self.detail_items
-                    .push("Browse and edit desktop entries (later milestone)".into());
-            }
             Workspace::Config => {
                 self.detail_title.set_label("Configuration");
-                self.detail_items.push(format!(
-                    "config file: {}",
-                    self.paths.config_file().display()
-                ));
+                self.detail_items
+                    .push(format!("path:    {}", self.paths.config_file().display()));
+                self.detail_items
+                    .push(format!("theme:   {}", self.config.theme));
+                self.detail_items
+                    .push(format!("confirm: {}", self.config.confirm_destructive));
+                let m = &self.config.modeline;
+                for (name, value) in [
+                    ("mode", m.mode),
+                    ("workspace", m.workspace),
+                    ("selection", m.selection),
+                    ("count", m.count),
+                    ("default", m.default),
+                    ("scope", m.scope),
+                    ("status", m.status),
+                    ("theme", m.theme),
+                ] {
+                    self.detail_items.push(format!("modeline.{name} = {value}"));
+                }
+                self.detail_items.push(String::new());
+                self.detail_items.push("(Enter opens in $EDITOR)".into());
             }
         }
         if self.detail_items != self.rendered_detail {
