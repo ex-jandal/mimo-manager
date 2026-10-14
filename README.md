@@ -12,7 +12,8 @@ A keyboard-centric MIME type and default-application manager for Linux. Browse t
 - **SIMPLE mode**: Set defaults for common roles (File manager, Terminal, Web browser, Email, Text editor) and content categories (Audio, Video, Images, Text, Fonts, PDF, Archives, Documents).
 - **Instant apply + undo**: `u` undoes the last change, `Ctrl+r` redoes.
 - **Command palette with autocomplete**: `:set-default`, `:add`, `:remove`, `:reset`, `:filter`, `:ws`, `:open-config`, `:theme`, `:help`, `:quit` (Tab accepts ghost).
-- **Melange Dark**: Compact modeline, square UI, mouse optional.
+- **Themes**: Melange Dark (default), Gruvbox Dark, Nord, Catppuccin Mocha, Tokyo Night. Switch live with `:theme <NAME>` or set `theme` in the config.
+- **Melange Dark aesthetic**: Compact modeline, square UI, mouse optional.
 
 ## Showcase
 
@@ -74,6 +75,23 @@ Type `:help` to see all commands and key bindings.
 ## Configuration
 
 Configuration is stored at `$XDG_CONFIG_HOME/mimo_manager/config.toml`. When using the Home Manager module with `settings`, it is generated for you. The app uses sensible defaults if the file is missing or empty.
+
+```toml
+theme = "MELANGE DARK"   # MELANGE DARK, GRUVBOX DARK, NORD, CATPPUCCIN MOCHA, TOKYO NIGHT
+confirm_destructive = true
+
+[modeline]
+mode = true
+workspace = true
+selection = true
+count = true
+default = true
+scope = true
+status = true
+theme = false
+```
+
+Change the theme at runtime with `:theme <NAME>` (session only; update the config to make it permanent).
 
 ## License
 

@@ -38,6 +38,8 @@ struct AppModel {
     rendered_detail: Vec<String>,
     load_error: Option<String>,
     modeline_fields: ModelineFields,
+    palette: theme::Palette,
+    css_provider: gtk::CssProvider,
 
     window: gtk::ApplicationWindow,
     list_box: gtk::ListBox,
@@ -155,11 +157,12 @@ impl SimpleComponent for AppModel {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        install_css();
-
         let widgets = view_output!();
 
         let (paths, config, db, apps, assoc, session, load_error) = load_world();
+
+        let palette = theme::palette(&config.theme);
+        let css_provider = install_css(&palette);
 
         let mut interaction = Interaction::new();
         interaction.set_confirm_destructive(config.confirm_destructive);
@@ -180,6 +183,8 @@ impl SimpleComponent for AppModel {
             rendered_detail: Vec::new(),
             load_error,
             modeline_fields: ModelineFields::default(),
+            palette,
+            css_provider,
             window: widgets.main_window.clone(),
             list_box: widgets.list_box.clone(),
             list_scroll: widgets.list_scroll.clone(),
@@ -273,10 +278,7 @@ impl AppModel {
                     _ => {}
                 },
                 Action::OpenConfig => self.open_config(),
-                Action::SetTheme(_) => {
-                    self.interaction
-                        .set_status(Some("themes arrive in a later milestone".into()));
-                }
+                Action::SetTheme(name) => self.set_theme(&name),
                 Action::Quit => self.window.close(),
             }
         }
@@ -299,6 +301,22 @@ impl AppModel {
 
     fn fail(&mut self, error: crate::Error) {
         self.interaction.set_status(Some(format!("error: {error}")));
+    }
+
+    fn set_theme(&mut self, name: &str) {
+        if !theme::is_known(name) {
+            self.interaction.set_status(Some(format!(
+                "unknown theme: {name} (try {})",
+                theme::theme_names().join(", ")
+            )));
+            self.update_modeline();
+            return;
+        }
+        self.config.theme = name.to_string();
+        self.palette = theme::palette(name);
+        self.css_provider.load_from_data(&self.palette.stylesheet());
+        self.interaction.set_status(Some(format!("theme: {name}")));
+        self.refresh();
     }
 
     fn open_config(&mut self) {
@@ -382,7 +400,7 @@ impl AppModel {
         let labels: Vec<&str> = Workspace::ALL.iter().map(|w| w.label()).collect();
         let active = self.interaction.workspace_index() - 1;
         self.workspace_tabs
-            .set_markup(&theme::workspace_tabs(&labels, active));
+            .set_markup(&theme::workspace_tabs(&self.palette, &labels, active));
     }
 
     /// Derive how many rows fit on screen so half-page jumps match the window.
@@ -660,7 +678,7 @@ impl AppModel {
             status,
             theme: self.config.theme.clone(),
         };
-        let (left, right) = theme::render(&self.modeline_fields, &modeline);
+        let (left, right) = theme::render(&self.palette, &self.modeline_fields, &modeline);
         self.modeline_left.set_markup(&left);
         self.modeline_right.set_markup(&right);
     }
@@ -693,7 +711,7 @@ impl AppModel {
             } else {
                 format!(
                     "<span foreground=\"{}\">{}</span>",
-                    theme::MELANGE_DARK.fg_dim,
+                    self.palette.fg_dim,
                     glib::markup_escape_text(&ghost)
                 )
             };
@@ -822,17 +840,17 @@ fn translate_key(key: gdk::Key, state: gdk::ModifierType) -> Option<UiKey> {
     }
 }
 
-fn install_css() {
-    let Some(display) = gdk::Display::default() else {
-        return;
-    };
+fn install_css(palette: &theme::Palette) -> gtk::CssProvider {
     let provider = gtk::CssProvider::new();
-    provider.load_from_data(&theme::MELANGE_DARK.stylesheet());
-    gtk::style_context_add_provider_for_display(
-        &display,
-        &provider,
-        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
+    provider.load_from_data(&palette.stylesheet());
+    if let Some(display) = gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+    provider
 }
 
 /// Run the application.

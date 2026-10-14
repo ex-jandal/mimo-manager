@@ -92,7 +92,7 @@ impl Config {
                 message: format!(
                     "unknown theme {:?}; available themes: {}",
                     config.theme,
-                    theme::THEMES.join(", ")
+                    theme::theme_names().join(", ")
                 ),
             });
         }

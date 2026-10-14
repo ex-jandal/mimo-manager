@@ -49,14 +49,123 @@ pub const MELANGE_DARK: Palette = Palette {
     magenta_bright: "#CF9BC2",
 };
 
+/// The canonical Gruvbox Dark palette.
+pub const GRUVBOX_DARK: Palette = Palette {
+    bg: "#282828",
+    bg_alt: "#3c3836",
+    selection: "#504945",
+    fg: "#ebdbb2",
+    fg_alt: "#d5c4a1",
+    fg_dim: "#928374",
+    red: "#cc241d",
+    red_bright: "#fb4934",
+    yellow: "#d79921",
+    yellow_bright: "#fabd2f",
+    green: "#98971a",
+    green_bright: "#b8bb26",
+    blue: "#458588",
+    blue_bright: "#83a598",
+    cyan: "#689d6a",
+    cyan_bright: "#8ec07c",
+    magenta: "#b16286",
+    magenta_bright: "#d3869b",
+};
+
+/// The Nord palette.
+pub const NORD: Palette = Palette {
+    bg: "#2e3440",
+    bg_alt: "#3b4252",
+    selection: "#434c5e",
+    fg: "#eceff4",
+    fg_alt: "#d8dee9",
+    fg_dim: "#616e88",
+    red: "#bf616a",
+    red_bright: "#cf7079",
+    yellow: "#ebcb8b",
+    yellow_bright: "#efd49a",
+    green: "#a3be8c",
+    green_bright: "#b1c9a0",
+    blue: "#81a1c1",
+    blue_bright: "#8fadd0",
+    cyan: "#88c0d0",
+    cyan_bright: "#96cbd9",
+    magenta: "#b48ead",
+    magenta_bright: "#c19dbb",
+};
+
+/// The Catppuccin Mocha palette.
+pub const CATPPUCCIN_MOCHA: Palette = Palette {
+    bg: "#1e1e2e",
+    bg_alt: "#313244",
+    selection: "#45475a",
+    fg: "#cdd6f4",
+    fg_alt: "#bac2de",
+    fg_dim: "#7f849c",
+    red: "#f38ba8",
+    red_bright: "#f5a0b8",
+    yellow: "#f9e2af",
+    yellow_bright: "#fbe9c4",
+    green: "#a6e3a1",
+    green_bright: "#b8eab4",
+    blue: "#89b4fa",
+    blue_bright: "#a3c4fb",
+    cyan: "#94e2d5",
+    cyan_bright: "#a8e8dd",
+    magenta: "#cba6f7",
+    magenta_bright: "#d8bbf9",
+};
+
+/// The Tokyo Night palette.
+pub const TOKYO_NIGHT: Palette = Palette {
+    bg: "#1a1b26",
+    bg_alt: "#24283b",
+    selection: "#414868",
+    fg: "#c0caf5",
+    fg_alt: "#a9b1d6",
+    fg_dim: "#565f89",
+    red: "#f7768e",
+    red_bright: "#ff8fa3",
+    yellow: "#e0af68",
+    yellow_bright: "#e8c088",
+    green: "#9ece6a",
+    green_bright: "#b0d888",
+    blue: "#7aa2f7",
+    blue_bright: "#94b5f5",
+    cyan: "#7dcfff",
+    cyan_bright: "#9adaff",
+    magenta: "#bb9af7",
+    magenta_bright: "#cbb0f9",
+};
+
+/// The name of the palette used when none is configured.
 pub const THEME_NAME: &str = "MELANGE DARK";
 
-/// The themes this build knows how to render.
-pub const THEMES: &[&str] = &[THEME_NAME];
+/// The themes this build knows how to render, in menu order.
+pub const THEMES: &[(&str, Palette)] = &[
+    (THEME_NAME, MELANGE_DARK),
+    ("GRUVBOX DARK", GRUVBOX_DARK),
+    ("NORD", NORD),
+    ("CATPPUCCIN MOCHA", CATPPUCCIN_MOCHA),
+    ("TOKYO NIGHT", TOKYO_NIGHT),
+];
 
 /// Whether `name` names a theme this build can render.
 pub fn is_known(name: &str) -> bool {
-    THEMES.contains(&name)
+    THEMES.iter().any(|(known, _)| *known == name)
+}
+
+/// The palette for `name`, falling back to the default theme.
+pub fn palette(name: &str) -> Palette {
+    THEMES
+        .iter()
+        .find(|(known, _)| *known == name)
+        .map(|(_, palette)| *palette)
+        .unwrap_or(MELANGE_DARK)
+}
+
+/// The names of every theme this build can render.
+pub fn theme_names() -> Vec<&'static str> {
+    THEMES.iter().map(|(name, _)| *name).collect()
 }
 
 /// UI scale for text and rows, relative to the system default font size.
@@ -133,9 +242,7 @@ pub struct Modeline {
 /// Render the modeline as two Pango markup strings: the left group (state and
 /// buffer context) and the right group (position and status). The interface
 /// justifies them to opposite edges, Doom-style.
-pub fn render(fields: &ModelineFields, modeline: &Modeline) -> (String, String) {
-    let palette = MELANGE_DARK;
-
+pub fn render(palette: &Palette, fields: &ModelineFields, modeline: &Modeline) -> (String, String) {
     fn push(parts: &mut Vec<String>, enabled: bool, colour: &str, text: &str) {
         if enabled && !text.is_empty() {
             parts.push(span(colour, text));
@@ -174,8 +281,7 @@ fn span(colour: &str, text: &str) -> String {
 
 /// Render the workspace tab strip below the modeline, numbering each tab and
 /// highlighting the active one.
-pub fn workspace_tabs(labels: &[&str], active: usize) -> String {
-    let palette = MELANGE_DARK;
+pub fn workspace_tabs(palette: &Palette, labels: &[&str], active: usize) -> String {
     labels
         .iter()
         .enumerate()
@@ -227,7 +333,7 @@ mod tests {
 
     #[test]
     fn renders_enabled_fields_with_colour() {
-        let (left, right) = render(&ModelineFields::default(), &modeline());
+        let (left, right) = render(&MELANGE_DARK, &ModelineFields::default(), &modeline());
         assert!(left.contains("NORMAL"));
         assert!(left.contains("MIME TYPES"));
         assert!(left.contains("#85B695"), "mode uses the bright green");
@@ -236,7 +342,7 @@ mod tests {
 
     #[test]
     fn splits_state_left_and_position_right() {
-        let (left, right) = render(&ModelineFields::default(), &modeline());
+        let (left, right) = render(&MELANGE_DARK, &ModelineFields::default(), &modeline());
         assert!(left.contains("NORMAL") && left.contains("MIME TYPES"));
         assert!(!right.contains("NORMAL"));
         assert!(right.contains("3/128") && right.contains("128"));
@@ -250,7 +356,7 @@ mod tests {
             scope: false,
             ..ModelineFields::default()
         };
-        let (left, right) = render(&fields, &modeline());
+        let (left, right) = render(&MELANGE_DARK, &fields, &modeline());
         let all = format!("{left}{right}");
         assert!(!all.contains("set default"));
         assert!(!all.contains("SCOPE"));
@@ -259,14 +365,14 @@ mod tests {
 
     #[test]
     fn theme_field_is_off_by_default_but_renderable() {
-        let (_, right) = render(&ModelineFields::default(), &modeline());
+        let (_, right) = render(&MELANGE_DARK, &ModelineFields::default(), &modeline());
         assert!(!right.contains(THEME_NAME));
 
         let fields = ModelineFields {
             theme: true,
             ..ModelineFields::default()
         };
-        let (_, right) = render(&fields, &modeline());
+        let (_, right) = render(&MELANGE_DARK, &fields, &modeline());
         assert!(right.contains(THEME_NAME));
     }
 
@@ -274,7 +380,7 @@ mod tests {
     fn markup_is_escaped() {
         let mut m = modeline();
         m.status = "<bad> & worse".into();
-        let (_, right) = render(&ModelineFields::default(), &m);
+        let (_, right) = render(&MELANGE_DARK, &ModelineFields::default(), &m);
         assert!(right.contains("&lt;bad&gt; &amp; worse"));
     }
 
@@ -287,12 +393,32 @@ mod tests {
 
     #[test]
     fn workspace_tabs_highlight_the_active_one() {
-        let tabs = workspace_tabs(&["MIME TYPES", "SIMPLE"], 1);
+        let tabs = workspace_tabs(&MELANGE_DARK, &["MIME TYPES", "SIMPLE"], 1);
         assert!(tabs.contains("1 MIME TYPES") && tabs.contains("2 SIMPLE"));
         assert!(
             tabs.contains(MELANGE_DARK.green_bright),
             "the active tab is bright"
         );
         assert!(tabs.contains(MELANGE_DARK.fg_dim), "the others are dim");
+    }
+
+    #[test]
+    fn registry_resolves_names_and_falls_back() {
+        assert!(theme_names().contains(&THEME_NAME));
+        assert_eq!(palette(THEME_NAME), MELANGE_DARK);
+        assert_eq!(palette("NORD"), NORD);
+        assert_eq!(palette("does not exist"), MELANGE_DARK);
+        assert!(is_known("TOKYO NIGHT") && !is_known("TOKYO DAY"));
+        assert_eq!(THEMES.len(), theme_names().len());
+    }
+
+    #[test]
+    fn every_theme_renders_a_stylesheet_with_its_own_background() {
+        for (name, p) in THEMES {
+            let css = p.stylesheet();
+            assert!(css.contains(p.bg), "{name} has no background");
+            let (left, _) = render(p, &ModelineFields::default(), &modeline());
+            assert!(left.contains(p.green_bright), "{name} modeline colours");
+        }
     }
 }

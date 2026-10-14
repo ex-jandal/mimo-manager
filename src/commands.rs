@@ -63,7 +63,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         name: "theme",
         aliases: &[],
         args: "<name>",
-        help: "Set the theme.",
+        help: "Switch theme (MELANGE DARK, GRUVBOX DARK, NORD, CATPPUCCIN MOCHA, TOKYO NIGHT).",
     },
     CommandSpec {
         name: "help",
